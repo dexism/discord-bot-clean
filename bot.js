@@ -1,9 +1,12 @@
 require('dotenv').config();
 
-const { GoogleGenAI } = require('@google/genai'); // ← importではなく require に変更
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// 使用するパッケージを@google/genaiに統一
+const { GoogleGenerativeAI } = require('@google/genai');
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// 使用するモデルを指定（モデル名は実際の有効なものにしてください）
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-const BOT_VERSION = 'v0.1.2';
+const BOT_VERSION = 'v0.2.2';
 
 const { Client, GatewayIntentBits } = require('discord.js');
 const client = new Client({
@@ -30,10 +33,6 @@ const rollDice = (count, sides) => {
     return rolls;
 };
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-light' });
-
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
@@ -56,8 +55,8 @@ client.on('messageCreate', async message => {
     if (parsed) {
         const { count, sides } = parsed;
         if (count > 100 || sides > 1000) {
-        message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）');
-        return;
+            message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）');
+            return;
         }
         const results = rollDice(count, sides);
         const total = results.reduce((a, b) => a + b, 0);
@@ -65,14 +64,12 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // Gemini 2.5 応答（ver, ping, dice に該当しない場合）
+    // Gemini 応答
     try {
-        const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-lite',
-        contents: [{ role: 'user', parts: [{ text: command }] }]
-        });
-        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '応答が取得できませんでした。';
-        message.reply(reply);
+        const result = await model.generateContent(command);
+        const response = await result.response;
+        const text = response.text();
+        message.reply(text);
     } catch (error) {
         console.error('Gemini API error:', error);
         message.reply('すみません、応答に失敗しました。');
@@ -81,4 +78,5 @@ client.on('messageCreate', async message => {
 
 client.login(process.env.DISCORD_TOKEN);
 
+// Renderのスリープ対策
 require('express')().listen(3000, () => console.log('Fake server running'));
