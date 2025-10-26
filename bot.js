@@ -1,6 +1,9 @@
 require('dotenv').config();
 
-const BOT_VERSION = 'v0.1.1';
+const { GoogleGenAI } = require('@google/genai'); // ← importではなく require に変更
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+const BOT_VERSION = 'v0.1.2';
 
 const { Client, GatewayIntentBits } = require('discord.js');
 const client = new Client({
@@ -28,8 +31,8 @@ const rollDice = (count, sides) => {
 };
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-light' });
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
@@ -38,7 +41,7 @@ client.on('messageCreate', async message => {
 
     // バージョン確認
     if (command === '!ver') {
-        message.reply(`現在のBotバージョンは ${BOT_VERSION} です`);
+        message.reply(`現在の私のバージョンは ${BOT_VERSION} です`);
         return;
     }
 
@@ -62,11 +65,13 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // Gemini API 応答
+    // Gemini 2.5 応答（ver, ping, dice に該当しない場合）
     try {
-        const result = await model.generateContent(command);
-        // const reply = result.response.text();
-        const reply = result.response.candidates[0].content.parts[0].text;
+        const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-lite',
+        contents: [{ role: 'user', parts: [{ text: command }] }]
+        });
+        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '応答が取得できませんでした。';
         message.reply(reply);
     } catch (error) {
         console.error('Gemini API error:', error);
