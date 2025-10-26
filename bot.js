@@ -50,3 +50,5 @@ client.on('messageCreate', message => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
+require('express')().listen(3000, () => console.log('Fake server running'));
