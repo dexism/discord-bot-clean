@@ -34,13 +34,13 @@ const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
+    const command = message.content.trim();
+
     // バージョン確認
     if (command === '!ver') {
         message.reply(`現在のBotバージョンは ${BOT_VERSION} です`);
         return;
     }
-
-    const command = message.content.trim();
 
     // ping 応答
     if (command === '!ping') {
@@ -65,7 +65,8 @@ client.on('messageCreate', async message => {
     // Gemini API 応答
     try {
         const result = await model.generateContent(command);
-        const reply = result.response.text();
+        // const reply = result.response.text();
+        const reply = result.response.candidates[0].content.parts[0].text;
         message.reply(reply);
     } catch (error) {
         console.error('Gemini API error:', error);
