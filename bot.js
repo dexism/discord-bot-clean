@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const BOT_VERSION = 'v0.4.3';
+const BOT_VERSION = 'v0.4.4';
 
 const { GoogleGenAI } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -98,7 +98,7 @@ client.on('messageCreate', async message => {
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-lite',
                 systemInstruction: greetingPersona,
-                contents: []
+                contents: [{ role: 'user', parts: [{ text: ' ' }] }] 
             });
 
             const greetingReply = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -114,8 +114,6 @@ client.on('messageCreate', async message => {
         const isTwoPersonChat = participants.size === 2;
         const isMentioned = message.mentions.has(client.user.id);
         const isCalled = BOT_NAMES.some(name => command.toLowerCase().includes(name.toLowerCase()));
-
-        // --- ★ ここからペルソナ設定を英語ベースの厳格な構文に変更 ---
 
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
