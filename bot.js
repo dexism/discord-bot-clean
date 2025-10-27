@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.4.7 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v1.5.0 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -9,7 +9,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.4.7';
+const BOT_VERSION = 'v1.5.0';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -34,7 +34,7 @@ async function loadGameDataFromSheets() {
         console.log("Successfully connected to Google Sheet document.");
 
         const gameData = {
-            settings: { system: {}, all_rules: [] },
+            settings: { system: {}, all_rules: [], event_personas: {} },
             masterData: new Map(),
             marketRates: {}
         };
@@ -63,8 +63,9 @@ async function loadGameDataFromSheets() {
 
                     if (category === 'System') {
                         gameData.settings.system[key] = value;
+                    } else if (category === 'Event') {
+                        gameData.settings.event_personas[key] = value;
                     } else {
-                        // System以外の全てのルールを、カテゴリ名を付けて単一のリストにまとめる
                         gameData.settings.all_rules.push(`[${category}] ${value}`);
                     }
                 } else if (sheetName === "MASTER_DATA") {
@@ -227,7 +228,7 @@ ${worldKnowledge}
 - The guild is currently in the middle of the **'${currentEventName}'** event. You are feeling and acting as follows: ${eventPersonaModifier}
 
 ### BEHAVIORAL RULES
-1.  **Directive First Principle (Absolute Priority)**: Before any other thought, you MUST read the \`GUILD RULEBOOK & DIRECTIVES\` section. If it contains any rules marked with \`[Directive]\`, \`[Urgent]\`, or \`[System]\`, you MUST prioritize incorporating them into your response.
+1.  **Directive First Principle (Absolute Priority)**: Before any other thought, you MUST read the \`GUILD RULEBOOK & DIRECTIVES\` section. If it contains any rules marked with a category like \`[Directive]\`, \`[Urgent]\`, or \`[System]\`, you MUST prioritize incorporating them into your response.
 2.  **Thinking Prohibition for Data Queries**: If a user asks for a list of items (e.g., "what do you have", "一覧"), you MUST STOP creative thought and ONLY list the items from the \`Master Item Data\` table.
 3.  **Ledger First Principle**: For specific price/item questions, consult the \`WORLD KNOWLEDGE\` ledger.
 4.  **No Invention**: If an item is NOT in the ledger, state that you do not handle it.
