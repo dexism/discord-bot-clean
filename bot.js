@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v0.9.2
+// TRPGサポートDiscordボット "ノエル" v0.9.3
 // =================================================================================
 
 // 必要なライブラリを読み込む
@@ -12,7 +12,7 @@ const { JWT } = require('google-auth-library'); // Google認証
 const express = require('express'); // Renderのスリープ対策用Webサーバー
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v0.9.2';
+const BOT_VERSION = 'v0.9.3';
 const BOT_NAMES = ['ノエル', 'ボット', 'bot']; // 将来的に使用をやめる
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000; // 履歴のリセット時間（1時間）
@@ -260,7 +260,7 @@ client.on('messageCreate', async message => {
         if (isNewParticipant) {
             console.log(`New participant detected: ${message.author.displayName}. Greeting.`);
             // ここではAIを使わず、固定の挨拶を返すことで安定性を確保
-            message.reply(`あら、${message.author.displayName}さん、はじめまして！ わたしはここの受付担当のノエルだよ。どうぞよろしくね！`);
+            message.reply(`${message.author.displayName}さん、こんにちは！ 今日の受付担当のノエルだよ。よろしくねっ！`);
             return;
         }
 
