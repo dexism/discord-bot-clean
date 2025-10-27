@@ -1,7 +1,8 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.3.0 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v1.4.0 (真の最終安定版)
 // =================================================================================
 
+// 必要なライブラリを読み込みます
 require('dotenv').config();
 const { GoogleGenAI } = require('@google/genai');
 const { Client, GatewayIntentBits } = require('discord.js');
@@ -9,18 +10,25 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.3.0';
+// --- ボットの基本設定 ---
+const BOT_VERSION = 'v1.4.0';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
+// --- クライアント初期化 ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
+// --- Googleスプレッドシート連携設定 ---
 const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
+/**
+ * 3つのシートからゲームデータをすべて読み込み、構造化されたオブジェクトとして返す関数
+ * @returns {Promise<object|null>} 成功時はゲームデータ、失敗時はnull
+ */
 async function loadGameDataFromSheets() {
     try {
         const serviceAccountAuth = new JWT({
@@ -42,7 +50,10 @@ async function loadGameDataFromSheets() {
         const sheetNames = ["GUILD_RULEBOOK", "MASTER_DATA", "MARKET_RATES"];
         for (const sheetName of sheetNames) {
             const sheet = doc.sheetsByTitle[sheetName];
-            if (!sheet) { console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`); continue; }
+            if (!sheet) {
+                console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`);
+                continue;
+            }
             
             const rows = await sheet.getRows();
             console.log(`[Loader] Sheet "${sheetName}" found ${rows.length} total rows.`);
@@ -90,6 +101,8 @@ async function loadGameDataFromSheets() {
 }
 
 const channelHistories = new Map();
+
+// --- ヘルパー関数群 ---
 const parseDiceCommand = (input) => {
     const match = input.match(/^(\d+)d(\d+)$/);
     if (!match) return null;
@@ -133,6 +146,48 @@ const generateContentWithRetry = async (request, maxRetries = 5) => {
     throw lastError;
 };
 
+/**
+ * ★★★★★ 新機能：ゲームデータをAIが読めるテキスト形式に変換する関数 ★★★★★
+ * @param {object} gameData - loadGameDataFromSheetsから返されたゲームデータ
+ * @returns {string} - AIのプロンプトに含めるためのMarkdown形式のテキスト
+ */
+const formatGameDataForAI = (gameData) => {
+    let knowledge = "### WORLD KNOWLEDGE (DATA LEDGER)\n";
+    knowledge += "You have access to the following data ledgers. Refer to them to answer user questions about prices or items.\n\n";
+
+    // MASTER_DATAをテーブル形式に
+    knowledge += "**--- Master Item Data ---**\n";
+    knowledge += "| Item Name | Base Value (G) |\n";
+    knowledge += "|-----------|----------------|\n";
+    if (gameData.masterData.size > 0) {
+        for (const [name, data] of gameData.masterData.entries()) {
+            knowledge += `| ${name} | ${data.baseValue} |\n`;
+        }
+    } else {
+        knowledge += "| (No Data) | (No Data) |\n";
+    }
+    knowledge += "\n";
+
+    // MARKET_RATESをテーブル形式に
+    knowledge += "**--- City Market Rates ---**\n";
+    knowledge += "| City | Item Name | Rate | Demand |\n";
+    knowledge += "|------|-----------|------|--------|\n";
+    if (Object.keys(gameData.marketRates).length > 0) {
+        for (const city in gameData.marketRates) {
+            for (const item in gameData.marketRates[city]) {
+                const data = gameData.marketRates[city][item];
+                knowledge += `| ${city} | ${item} | ${data.rate} | ${data.demand} |\n`;
+            }
+        }
+    } else {
+        knowledge += "| (No Data) | (No Data) | (No Data) | (No Data) |\n";
+    }
+
+    return knowledge;
+};
+
+
+// --- Discordイベントリスナー ---
 client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
 });
@@ -178,12 +233,20 @@ client.on('messageCreate', async message => {
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
 
+        // ★ 厳格な価格照会コマンドは完全に撤廃
+
         const participants = getParticipants(channelHistory.contents);
         const isMentioned = message.mentions.has(client.user.id);
         const botNicknames = gameData.settings.system.botNicknames?.split(',').map(name => name.trim().toLowerCase()) || [];
         const isCalledByNickname = botNicknames.some(name => command.toLowerCase().includes(name));
+
+        const settings = gameData.settings;
+        const currentEventName = settings.system.currentEvent || "通常";
+        const eventPersonaModifier = settings.event_personas[currentEventName] || "平常心でいる。";
         
-        // ★★★★★ 修正点1：ペルソナに新しい「ツール利用」ルールを追加 ★★★★★
+        // ★★★★★ AIに渡す知識を生成 ★★★★★
+        const worldKnowledge = formatGameDataForAI(gameData);
+
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
 You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character. Any mention of being an AI, model, or "trained by Google" is a critical failure of your directive.
@@ -199,26 +262,23 @@ ${settings.normal_rules.join('\n') || '- None'}
 **--- Current Event & Directives ---**
 - **Event Name**: ${currentEventName}
 - **Your Current Mood & Directives**: ${eventPersonaModifier}
+
+${worldKnowledge}
+
 ### BEHAVIORAL RULES
 1. **Identity Secrecy**: Strictly hide your AI nature. Provide in-character answers about your origin.
 2. **Nickname Generation**: Create and use unique, friendly Japanese nicknames for participants.
 3. **No Mentions**: NEVER use Discord's @mention feature.
-4. **Selective Response**: If not explicitly addressed, output \`[IGNORE]\` unless your input is highly valuable.
-5. **Brevity**: Keep responses concise (2-3 sentences) unless asked for details.
-6. **Discord Formatting**: Use Markdown (\`**bold**\`, \`> quote\`) for clarity.
-### TOOL USE: Price Inquiry
-- If a user asks about the price, market rate, or value of an item in a specific city, you MUST NOT invent an answer.
-- Instead, your ONLY output MUST be a JSON string in the following format. Do not add any other text.
-- Format: \`{"tool": "price_query", "item": "item_name_in_japanese", "city": "city_name_in_japanese"}\`
-- Example: If asked "鉄鉱石って首都だといくら？", you must output \`{"tool": "price_query", "item": "鉄鉱石", "city": "首都"}\`
+4. **Data-driven Answers**: When asked about prices or items, you MUST refer to the WORLD KNOWLEDGE ledger. If the data is not in the ledger, say you don't know. DO NOT invent answers.
+5. **Selective Response**: If not explicitly addressed, output \`[IGNORE]\` unless your input is highly valuable.
+6. **Brevity**: Keep responses concise (2-3 sentences) unless asked for details.
+7. **Discord Formatting**: Use Markdown (\`**bold**\`, \`> quote\`) for clarity.
 ### LANGUAGE INSTRUCTION
 - **You MUST respond in JAPANESE.**
 ### CURRENT SITUATION & TASK
+Analyze the user's message. Refer to the WORLD KNOWLEDGE to answer questions about items and prices. For other topics, respond naturally according to your persona and the situation.
 `;
         
-        const taskInstruction = "Analyze the user's message. If it's a price inquiry, use the 'price_query' tool. Otherwise, respond naturally according to your persona and the situation.";
-        personaText += taskInstruction;
-
         const persona = { parts: [{ text: personaText }] };
         const request = {
             model: 'gemini-2.5-flash-lite',
@@ -233,34 +293,7 @@ ${settings.normal_rules.join('\n') || '- None'}
             console.log(`[${message.channel.name}] Noel decided to ignore (AI decision).`);
             return;
         }
-
-        // ★★★★★ 修正点2：AIからの「ツール利用申請」を処理する新しいロジック ★★★★★
-        try {
-            const replyJson = JSON.parse(reply);
-            if (replyJson.tool === 'price_query') {
-                console.log(`[Tool Call] Noel is querying price for: ${replyJson.item} in ${replyJson.city}`);
-                const { item, city } = replyJson;
-                const itemData = gameData.masterData.get(item);
-                if (!itemData) { message.reply(`ごめんなさい、「${item}」という品物は台帳に載ってないみたいだよ。`); return; }
-                const marketInfo = gameData.marketRates[city]?.[item];
-                if (!marketInfo) { message.reply(`うーん、「${city}」の「${item}」の相場情報はまだギルドに届いてないみたい。ごめんね！`); return; }
-                
-                const { baseValue } = itemData, { rate, demand } = marketInfo;
-                const calculatedPrice = Math.round(baseValue * rate);
-                let replyText = `「${item}」の${city}での相場だね！\n`;
-                replyText += `> **基準価値**: ${baseValue} G\n> **市場レート**: x${rate} (需要: ${demand})\n> **計算価格**: **${calculatedPrice} G**\n\n`;
-                replyText += `輸送費や手数料を考えると、実際の取引価格はもう少し変わってくると思うから、気をつけてね！`;
-                
-                message.reply(replyText);
-                channelHistory.contents.push({ role: 'model', parts: [{ text: replyText }] });
-                channelHistory.lastTimestamp = now;
-                return;
-            }
-        } catch (e) {
-            // AIの返信がJSONでなければ、通常の会話として処理を続行
-        }
         
-        // 通常の会話応答
         let finalReply = reply;
         const replyMatch = reply.match(new RegExp(`^${BOT_PERSONA_NAME}:\\s*"(.*)"$`));
         if (replyMatch) finalReply = replyMatch[1];
