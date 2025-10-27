@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const BOT_VERSION = 'v0.5.0';
+const BOT_VERSION = 'v0.5.1';
 
 const { GoogleGenAI } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -154,4 +154,14 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 
 client.login(process.env.DISCORD_TOKEN);
 
-require('express')().listen(process.env.PORT || 3000, () => console.log('Fake server running'));
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send(`Hello! I am ${BOT_PERSONA_NAME}, Bot version ${BOT_VERSION}. I am awake!`);
+});
+
+app.listen(port, () => {
+  console.log(`Fake server is running on port ${port}`);
+});
