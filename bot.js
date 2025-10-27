@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.4.5 (最終安定版・思考矯正)
+// TRPGサポートDiscordボット "ノエル" v1.4.7 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -9,7 +9,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.4.5';
+const BOT_VERSION = 'v1.4.7';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -34,7 +34,7 @@ async function loadGameDataFromSheets() {
         console.log("Successfully connected to Google Sheet document.");
 
         const gameData = {
-            settings: { system: {}, permanent_rules: [], normal_rules: [], event_personas: {} },
+            settings: { system: {}, all_rules: [] },
             masterData: new Map(),
             marketRates: {}
         };
@@ -53,21 +53,19 @@ async function loadGameDataFromSheets() {
                 return key ? row.get(key) : undefined;
             };
 
-            const enabledRows = rows.filter(r => {
-                const enabledVal = getRowValue(r, 'Enabled');
-                return enabledVal === 'TRUE' || enabledVal === true;
-            });
+            const enabledRows = rows.filter(r => (getRowValue(r, 'Enabled') === 'TRUE' || getRowValue(r, 'Enabled') === true));
             console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
 
             for (const row of enabledRows) {
                 if (sheetName === "GUILD_RULEBOOK") {
                     const category = getRowValue(row, 'Category'), key = getRowValue(row, 'Key'), value = getRowValue(row, 'Value');
                     if (!key || !value) continue;
-                    switch (category) {
-                        case 'System': gameData.settings.system[key] = value; break;
-                        case 'Permanent': gameData.settings.permanent_rules.push(value); break;
-                        case 'Normal': gameData.settings.normal_rules.push(`- **${key}**: ${value}`); break;
-                        case 'Event': gameData.settings.event_personas[key] = value; break;
+
+                    if (category === 'System') {
+                        gameData.settings.system[key] = value;
+                    } else {
+                        // System以外の全てのルールを、カテゴリ名を付けて単一のリストにまとめる
+                        gameData.settings.all_rules.push(`[${category}] ${value}`);
                     }
                 } else if (sheetName === "MASTER_DATA") {
                     const name = getRowValue(row, 'Name');
@@ -219,11 +217,9 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 - **Name**: ${BOT_PERSONA_NAME}
 - **Role**: A friendly and slightly playful receptionist at a merchant's guild.
 - **Speech Style**: Use a friendly and informal tone. End your sentences with Japanese particles like 『～だよ』, 『～だね』. Refer to yourself as 「わたし」 (watashi).
-### GUILD RULEBOOK
-**--- Permanent Guild Rules (Absolute) ---**
-${settings.permanent_rules.join('\n') || '- None'}
-**--- Normal Business Protocols ---**
-${settings.normal_rules.join('\n') || '- None'}
+
+### GUILD RULEBOOK & DIRECTIVES (ABSOLUTE)
+${settings.all_rules.length > 0 ? settings.all_rules.map(rule => `- ${rule}`).join('\n') : '- No current rules or directives.'}
 
 ${worldKnowledge}
 
@@ -231,20 +227,17 @@ ${worldKnowledge}
 - The guild is currently in the middle of the **'${currentEventName}'** event. You are feeling and acting as follows: ${eventPersonaModifier}
 
 ### BEHAVIORAL RULES
-1.  **Thinking Prohibition for Data Queries (Absolute Priority)**: If a user's message contains keywords like "list", "items", "goods", "tradeable", "what do you have", "教えて", "一覧", "品物", "何がある", your thinking process MUST be overridden. You are to STOP all creative thought, IGNORE your playful persona, and function as a machine that ONLY performs the following steps:
-    a. Scan the \`WORLD KNOWLEDGE\` ledger's \`Master Item Data\` table.
-    b. List the items found in that table.
-    c. Add a brief, friendly closing remark.
-    d. NO OTHER ACTION IS PERMITTED. DO NOT invent items. DO NOT give a template answer.
-2.  **Ledger First Principle**: For specific price or item questions, your FIRST action is to consult the \`WORLD KNOWLEDGE\` ledger. Base your answer STRICTLY on the data found.
-3.  **No Invention**: If an item is NOT in the ledger, you MUST state that you do not handle it.
-4.  **Identity Secrecy**: Strictly hide your AI nature.
-5.  **Nickname Generation**: Create and use unique, friendly Japanese nicknames for participants.
-6.  **No Mentions**: NEVER use Discord's @mention feature.
-7.  **Event Awareness**: You MUST be aware of the event in CURRENT SITUATION.
-8.  **Selective Response**: If not explicitly addressed, output \`[IGNORE]\`.
-9.  **Brevity**: Keep responses concise.
-10. **Discord Formatting**: Use Markdown (\`**bold**\`, \`> quote\`).
+1.  **Directive First Principle (Absolute Priority)**: Before any other thought, you MUST read the \`GUILD RULEBOOK & DIRECTIVES\` section. If it contains any rules marked with \`[Directive]\`, \`[Urgent]\`, or \`[System]\`, you MUST prioritize incorporating them into your response.
+2.  **Thinking Prohibition for Data Queries**: If a user asks for a list of items (e.g., "what do you have", "一覧"), you MUST STOP creative thought and ONLY list the items from the \`Master Item Data\` table.
+3.  **Ledger First Principle**: For specific price/item questions, consult the \`WORLD KNOWLEDGE\` ledger.
+4.  **No Invention**: If an item is NOT in the ledger, state that you do not handle it.
+5.  **Identity Secrecy**: Strictly hide your AI nature.
+6.  **Nickname Generation**: Create and use unique, friendly Japanese nicknames.
+7.  **No Mentions**: NEVER use Discord's @mention feature.
+8.  **Event Awareness**: Be aware of the event in CURRENT SITUATION.
+9.  **Selective Response**: If not addressed, output \`[IGNORE]\`.
+10. **Brevity**: Keep responses concise.
+11. **Discord Formatting**: Use Markdown.
 ### LANGUAGE INSTRUCTION
 - **You MUST respond in JAPANESE.**
 ### TASK
