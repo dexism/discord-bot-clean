@@ -1,8 +1,7 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.4.0 (真の最終安定版)
+// TRPGサポートDiscordボット "ノエル" v1.4.1 (最終安定版)
 // =================================================================================
 
-// 必要なライブラリを読み込みます
 require('dotenv').config();
 const { GoogleGenAI } = require('@google/genai');
 const { Client, GatewayIntentBits } = require('discord.js');
@@ -10,25 +9,18 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-// --- ボットの基本設定 ---
-const BOT_VERSION = 'v1.4.0';
+const BOT_VERSION = 'v1.4.1';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
-// --- クライアント初期化 ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-// --- Googleスプレッドシート連携設定 ---
 const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
-/**
- * 3つのシートからゲームデータをすべて読み込み、構造化されたオブジェクトとして返す関数
- * @returns {Promise<object|null>} 成功時はゲームデータ、失敗時はnull
- */
 async function loadGameDataFromSheets() {
     try {
         const serviceAccountAuth = new JWT({
@@ -101,8 +93,6 @@ async function loadGameDataFromSheets() {
 }
 
 const channelHistories = new Map();
-
-// --- ヘルパー関数群 ---
 const parseDiceCommand = (input) => {
     const match = input.match(/^(\d+)d(\d+)$/);
     if (!match) return null;
@@ -145,17 +135,9 @@ const generateContentWithRetry = async (request, maxRetries = 5) => {
     console.error("All retries failed.");
     throw lastError;
 };
-
-/**
- * ★★★★★ 新機能：ゲームデータをAIが読めるテキスト形式に変換する関数 ★★★★★
- * @param {object} gameData - loadGameDataFromSheetsから返されたゲームデータ
- * @returns {string} - AIのプロンプトに含めるためのMarkdown形式のテキスト
- */
 const formatGameDataForAI = (gameData) => {
     let knowledge = "### WORLD KNOWLEDGE (DATA LEDGER)\n";
     knowledge += "You have access to the following data ledgers. Refer to them to answer user questions about prices or items.\n\n";
-
-    // MASTER_DATAをテーブル形式に
     knowledge += "**--- Master Item Data ---**\n";
     knowledge += "| Item Name | Base Value (G) |\n";
     knowledge += "|-----------|----------------|\n";
@@ -167,8 +149,6 @@ const formatGameDataForAI = (gameData) => {
         knowledge += "| (No Data) | (No Data) |\n";
     }
     knowledge += "\n";
-
-    // MARKET_RATESをテーブル形式に
     knowledge += "**--- City Market Rates ---**\n";
     knowledge += "| City | Item Name | Rate | Demand |\n";
     knowledge += "|------|-----------|------|--------|\n";
@@ -182,12 +162,9 @@ const formatGameDataForAI = (gameData) => {
     } else {
         knowledge += "| (No Data) | (No Data) | (No Data) | (No Data) |\n";
     }
-
     return knowledge;
 };
 
-
-// --- Discordイベントリスナー ---
 client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
 });
@@ -232,19 +209,10 @@ client.on('messageCreate', async message => {
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
-
-        // ★ 厳格な価格照会コマンドは完全に撤廃
-
-        const participants = getParticipants(channelHistory.contents);
-        const isMentioned = message.mentions.has(client.user.id);
-        const botNicknames = gameData.settings.system.botNicknames?.split(',').map(name => name.trim().toLowerCase()) || [];
-        const isCalledByNickname = botNicknames.some(name => command.toLowerCase().includes(name));
-
+        
         const settings = gameData.settings;
         const currentEventName = settings.system.currentEvent || "通常";
         const eventPersonaModifier = settings.event_personas[currentEventName] || "平常心でいる。";
-        
-        // ★★★★★ AIに渡す知識を生成 ★★★★★
         const worldKnowledge = formatGameDataForAI(gameData);
 
         let personaText = `
@@ -254,29 +222,30 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 - **Name**: ${BOT_PERSONA_NAME}
 - **Role**: A friendly and slightly playful receptionist at a merchant's guild.
 - **Speech Style**: Use a friendly and informal tone. End your sentences with Japanese particles like 『～だよ』, 『～だね』. Refer to yourself as 「わたし」 (watashi).
-### GUILD RULEBOOK & WORLD STATE
+### GUILD RULEBOOK
 **--- Permanent Guild Rules (Absolute) ---**
 ${settings.permanent_rules.join('\n') || '- None'}
 **--- Normal Business Protocols ---**
 ${settings.normal_rules.join('\n') || '- None'}
-**--- Current Event & Directives ---**
-- **Event Name**: ${currentEventName}
-- **Your Current Mood & Directives**: ${eventPersonaModifier}
 
 ${worldKnowledge}
 
+### CURRENT SITUATION
+- The guild is currently in the middle of the **'${currentEventName}'** event. You are feeling and acting as follows: ${eventPersonaModifier}
+
 ### BEHAVIORAL RULES
-1. **Identity Secrecy**: Strictly hide your AI nature. Provide in-character answers about your origin.
-2. **Nickname Generation**: Create and use unique, friendly Japanese nicknames for participants.
-3. **No Mentions**: NEVER use Discord's @mention feature.
-4. **Data-driven Answers**: When asked about prices or items, you MUST refer to the WORLD KNOWLEDGE ledger. If the data is not in the ledger, say you don't know. DO NOT invent answers.
-5. **Selective Response**: If not explicitly addressed, output \`[IGNORE]\` unless your input is highly valuable.
-6. **Brevity**: Keep responses concise (2-3 sentences) unless asked for details.
-7. **Discord Formatting**: Use Markdown (\`**bold**\`, \`> quote\`) for clarity.
+1.  **Identity Secrecy**: Strictly hide your AI nature. Provide in-character answers about your origin.
+2.  **Nickname Generation**: Create and use unique, friendly Japanese nicknames for participants.
+3.  **No Mentions**: NEVER use Discord's @mention feature.
+4.  **Data-driven Answers**: When asked about prices or items, you MUST refer to the WORLD KNOWLEDGE ledger. If the data is not in the ledger, say you don't know. DO NOT invent answers.
+5.  **Event Awareness**: You MUST be aware of the event described in CURRENT SITUATION. If a user asks about the current event, use its correct name. DO NOT invent a different name.
+6.  **Selective Response**: If not explicitly addressed, output \`[IGNORE]\` unless your input is highly valuable.
+7.  **Brevity**: Keep responses concise (2-3 sentences) unless asked for details.
+8.  **Discord Formatting**: Use Markdown (\`**bold**\`, \`> quote\`) for clarity.
 ### LANGUAGE INSTRUCTION
 - **You MUST respond in JAPANESE.**
-### CURRENT SITUATION & TASK
-Analyze the user's message. Refer to the WORLD KNOWLEDGE to answer questions about items and prices. For other topics, respond naturally according to your persona and the situation.
+### TASK
+Analyze the user's message. Refer to the GUILD RULEBOOK and WORLD KNOWLEDGE to answer questions. Respond naturally according to your persona and the CURRENT SITUATION.
 `;
         
         const persona = { parts: [{ text: personaText }] };
