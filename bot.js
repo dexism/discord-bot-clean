@@ -32,9 +32,10 @@ const rollDice = (count, sides) => {
     return rolls;
 };
 
+// ★ 履歴の形式を新しい構造化フォーマットに更新
 const initialHistory = [
-    { role: 'user', parts: [{ text: "こんにちは、あなたがここの担当のノエルさん？" }] },
-    { role: 'model', parts: [{ text: `はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！` }] }
+    { role: 'user', parts: [{ text: `User "Newcomer": "こんにちは、あなたがここの担当のノエルさん？"` }] },
+    { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！"` }] }
 ];
 
 const getParticipants = (historyContents) => {
@@ -42,8 +43,11 @@ const getParticipants = (historyContents) => {
     participants.add(BOT_PERSONA_NAME);
     for (const content of historyContents) {
         if (content.role === 'user') {
-            const userName = content.parts[0].text.split(':')[0];
-            participants.add(userName);
+            // "User \"Username\": ..." という形式からUsernameを抽出
+            const match = content.parts[0].text.match(/User "([^"]+)"/);
+            if (match) {
+                participants.add(match[1]);
+            }
         }
     }
     return participants;
@@ -83,8 +87,9 @@ client.on('messageCreate', async message => {
 
         const existingParticipants = getParticipants(channelHistory.contents);
         const isNewParticipant = !existingParticipants.has(message.author.displayName);
-        
-        const userMessage = { role: 'user', parts: [{ text: `${message.author.displayName}: ${command}` }] };
+
+        // ユーザーの発言を構造化された形式で履歴に追加
+        const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
 
@@ -110,6 +115,8 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 2.  **Nickname Generation**: For each participant in the conversation, create a unique, friendly nickname in Japanese and call them by it.
 3.  **No Mentions**: NEVER use Discord's @mention feature. Always use the nicknames you created.
 4.  **Selective Response**: If you are not explicitly called and your response is not required by the current task, you must decide if your input is truly valuable. If not, your ONLY output MUST be the exact string \`[IGNORE]\`.
+5.  **Brevity**: Keep your responses concise and to the point (2-3 short sentences). Only provide longer explanations if specifically asked for details.
+6.  **Discord Formatting**: Use Discord's Markdown formatting (e.g., \`**bold**\`, \`*italics*\`, \`> blockquotes\`) to make your messages, especially explanations, clear and easy to read.
 
 ### LANGUAGE INSTRUCTION
 - **You MUST respond in JAPANESE.** All your outputs must be in the Japanese language.
@@ -141,10 +148,18 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
             console.log(`[${message.channel.name}] Noel decided to ignore.`);
             return;
         }
-
-        message.reply(reply);
-        channelHistory.contents.push({ role: 'model', parts: [{ text: reply }] });
-        channelHistory.lastTimestamp = Date.now();
+        
+        // AIの応答も構造化された形式で履歴に追加
+        // 応答から "Noel: " や引用符を削除して純粋なメッセージのみを送信する
+        let finalReply = reply;
+        const replyMatch = reply.match(new RegExp(`^${BOT_PERSONA_NAME}:\\s*"(.*)"$`));
+        if (replyMatch) {
+            finalReply = replyMatch[1];
+        }
+        
+        message.reply(finalReply);
+        channelHistory.contents.push({ role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${finalReply}"` }] });
+        channelHistory.lastTimestamp = now;
 
     } catch (error) {
         console.error('Gemini API error:', error);
