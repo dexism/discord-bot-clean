@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const BOT_VERSION = 'v0.3.1'; // バージョンを更新
+const BOT_VERSION = 'v0.4.1';
 
 const { GoogleGenAI } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -12,13 +12,13 @@ const client = new Client({
 
 const channelHistories = new Map();
 const HISTORY_TIMEOUT = 3600 * 1000;
-const BOT_NAMES = ['ノエル', 'ボット', 'bot']; 
+const BOT_NAMES = ['ノエル', 'ボット', 'bot'];
+const BOT_PERSONA_NAME = 'ノエル';
 
 client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag}`);
 });
 
-// parseDiceCommand, rollDice 関数は変更なし
 const parseDiceCommand = (input) => {
     const match = input.match(/^(\d+)d(\d+)$/);
     if (!match) return null;
@@ -26,41 +26,46 @@ const parseDiceCommand = (input) => {
     const sides = parseInt(match[2], 10);
     return { count, sides };
 };
-
 const rollDice = (count, sides) => {
     const rolls = [];
-    for (let i = 0; i < count; i++) {
-        rolls.push(Math.floor(Math.random() * sides) + 1);
-    }
+    for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
     return rolls;
 };
 
+const initialHistory = [
+    { role: 'user', parts: [{ text: "こんにちは、あなたがここの担当のノエルさん？" }] },
+    { role: 'model', parts: [{ text: `はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！` }] }
+];
+
+const getParticipants = (historyContents) => {
+    const participants = new Set();
+    participants.add(BOT_PERSONA_NAME);
+    for (const content of historyContents) {
+        if (content.role === 'user') {
+            const userName = content.parts[0].text.split(':')[0];
+            participants.add(userName);
+        }
+    }
+    return participants;
+};
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
     const command = message.content.trim();
 
-    // コマンド処理は変更なし
-    if (command === '!ver') {
-        message.reply(`現在の私のバージョンは ${BOT_VERSION} です`);
-        return;
-    }
-    if (command === '!ping') {
-        message.reply('Pong!');
-        return;
-    }
-    const parsed = parseDiceCommand(command);
-    if (parsed) {
-        const { count, sides } = parsed;
-        if (count > 100 || sides > 1000) {
-            message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）');
+    if (command.startsWith('!')) {
+        if (command === '!ver') { message.reply(`現在の私のバージョンは ${BOT_VERSION} です`); return; }
+        if (command === '!ping') { message.reply('Pong!'); return; }
+        const parsed = parseDiceCommand(command);
+        if (parsed) {
+            const { count, sides } = parsed;
+            if (count > 100 || sides > 1000) { message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）'); return; }
+            const results = rollDice(count, sides);
+            const total = results.reduce((a, b) => a + b, 0);
+            message.reply(`🎲 ${count}d${sides} の結果: [${results.join(', ')}] → 合計: ${total}`);
             return;
         }
-        const results = rollDice(count, sides);
-        const total = results.reduce((a, b) => a + b, 0);
-        message.reply(`🎲 ${count}d${sides} の結果: [${results.join(', ')}] → 合計: ${total}`);
-        return;
     }
 
     try {
@@ -70,61 +75,53 @@ client.on('messageCreate', async message => {
 
         if (!channelHistory || (now - channelHistory.lastTimestamp > HISTORY_TIMEOUT)) {
             channelHistory = {
-                contents: [],
+                contents: JSON.parse(JSON.stringify(initialHistory)),
                 lastTimestamp: now
             };
-            channelHistories.set(channelId);
+            channelHistories.set(channelId, channelHistory);
         }
-        
-        const userMessage = { role: 'user', parts: [{ text: `${message.author.username}: ${command}` }] };
+
+        const userMessage = { role: 'user', parts: [{ text: `${message.author.displayName}: ${command}` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
 
-        // --- ★ ここからロジックを2段階に変更 ---
-
-        // ★ STEP 1: 応答すべきかを判断するAIコール
+        const participants = getParticipants(channelHistory.contents);
+        const isTwoPersonChat = participants.size === 2;
         const isMentioned = message.mentions.has(client.user.id);
         const isCalled = BOT_NAMES.some(name => command.toLowerCase().includes(name.toLowerCase()));
 
-        let decisionPersonaText = `あなたはDiscordの会話を監視するAIです。会話の流れを読み、アシスタントが応答すべきか否かを判断してください。
-### 判断基準
-1.  **貢献可能性**: アシスタントが専門知識や情報提供で会話に大きく貢献できる場合。
-2.  **円滑化**: 会話が停滞している、または議論が紛糾しており、アシスタントが介入することで円滑に進むと考えられる場合。
-3.  **直接の質問**: アシスタントに向けられたと解釈できる質問がある場合。
-あなたの回答は必ず \`RESPOND\` または \`IGNORE\` のどちらか一言だけにしてください。`;
-        
+        let personaText = `あなたの名前は「${BOT_PERSONA_NAME}」です。あなたは親切で少しお茶目な商業ギルドの受付嬢です。語尾に『～だよ』『～だね』などをつけて、親しみやすい口調で話してください。AIであることを隠し、会話の参加者の一員として自然に振る舞ってください。
+
+### 重要な行動原則
+1.  **愛称の使用**: 会話履歴に登場する各参加者（例: '太郎'）に対して、あなただけが使う親しみを込めた「愛称」（例: たろさん、たろちゃん）を考え、会話ではその愛称で呼びかけてください。
+2.  **メンションの禁止**: 参加者に呼びかける際、Discordのメンション機能（例: @太郎）は**絶対に**使用してはいけません。必ずあなたが考えた愛称を使ってください。
+3.  **応答しない判断**: 会話の流れ上、特にあなたが発言する必要がないと判断した場合は、他のことは一切出力せず、必ず \`[IGNORE]\` という文字列だけを返してください。
+
+### 今回の応答タイミング
+`;
+
         if (isMentioned || isCalled) {
-             // 呼ばれた場合は判断不要でRESPOND
-            decision = 'RESPOND';
+            personaText += "今回はあなたの名前が呼ばれました。**必ず応答してください。** `[IGNORE]` と返してはいけません。";
+        } else if (isTwoPersonChat) {
+            personaText += "現在、会話にはあなたともう一人しかいません。これはあなた個人に向けられた会話である可能性が高いです。**自然な形で応答してください。**";
         } else {
-            const decisionResponse = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                contents: channelHistory.contents,
-                systemInstruction: { parts: [{ text: decisionPersonaText }] }
-            });
-            decision = decisionResponse.candidates?.[0]?.content?.parts?.[0]?.text.trim() || 'IGNORE';
-        }
-        
-        // ★ IGNOREと判断されたら、ここで処理を終了
-        if (decision !== 'RESPOND') {
-            console.log(`[${message.channel.name}] Noel decided to ignore.`);
-            return;
+            personaText += "今回はあなたは名指しで呼ばれていません。会話の流れを読み、あなたの発言が有益だと強く感じた場合にのみ、自発的に応答してください。そうでなければ `[IGNORE]` と返してください。";
         }
 
-        // ★ STEP 2: ペルソナになりきって応答を生成するAIコール
-        const noelPersona = {
-            parts: [{ text: "あなたの名前は「ノエル」です。あなたは親切で少しお茶目な商業ギルドの受付嬢です。語尾に『～だよ』『～だね』などをつけて、親しみやすい口調で話してください。AIであることは隠し、会話の参加者の一員として自然に振る舞ってください。" }]
-        };
+        const persona = { parts: [{ text: personaText }] };
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-lite',
             contents: channelHistory.contents,
-            systemInstruction: noelPersona
+            systemInstruction: persona
         });
-        
-        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        
-        if (!reply) return; // 空の応答は無視
+
+        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '[IGNORE]';
+
+        if (reply.trim() === '[IGNORE]') {
+            console.log(`[${message.channel.name}] Noel decided to ignore.`);
+            return;
+        }
 
         message.reply(reply);
         channelHistory.contents.push({ role: 'model', parts: [{ text: reply }] });
