@@ -13,7 +13,7 @@ const client = new Client({
 // ★★★★★ Googleスプレッドシート連携部分 ★★★★★
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
-const creds = require('./credentials.json'); 
+const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
 const serviceAccountAuth = new JWT({
   email: creds.client_email,
