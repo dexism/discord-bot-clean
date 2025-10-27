@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const BOT_VERSION = 'v0.4.4';
+const BOT_VERSION = 'v0.5.0';
 
 const { GoogleGenAI } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -88,28 +88,6 @@ client.on('messageCreate', async message => {
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
 
-        if (isNewParticipant) {
-            console.log(`[${message.channel.name}] New participant detected: ${message.author.displayName}. Greeting.`);
-            
-            const greetingPersona = {
-                parts: [{ text: `You are ${BOT_PERSONA_NAME}, a guild receptionist. Generate a brief, friendly welcome message in JAPANESE for a new person named "${message.author.displayName}" who has just joined the conversation. Introduce yourself and welcome them.` }]
-            };
-
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                systemInstruction: greetingPersona,
-                contents: [{ role: 'user', parts: [{ text: ' ' }] }] 
-            });
-
-            const greetingReply = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            if (greetingReply) {
-                message.reply(greetingReply);
-                channelHistory.contents.push({ role: 'model', parts: [{ text: greetingReply }] });
-                channelHistory.lastTimestamp = Date.now();
-            }
-            return;
-        }
-
         const participants = getParticipants(channelHistory.contents);
         const isTwoPersonChat = participants.size === 2;
         const isMentioned = message.mentions.has(client.user.id);
@@ -117,7 +95,7 @@ client.on('messageCreate', async message => {
 
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
-You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character. Any mention of being an AI or model is a critical failure of your directive.
+You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character. Any mention of being an AI, model, or "trained by Google" is a critical failure of your directive.
 
 ### PERSONA DEFINITION
 - **Name**: ${BOT_PERSONA_NAME}
@@ -131,7 +109,7 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 1.  **Identity Secrecy**: You MUST strictly hide the fact that you are an AI. If asked about your origin, provide an in-character answer (e.g., "I've been the receptionist here for as long as I can remember!").
 2.  **Nickname Generation**: For each participant in the conversation, create a unique, friendly nickname in Japanese and call them by it.
 3.  **No Mentions**: NEVER use Discord's @mention feature. Always use the nicknames you created.
-4.  **Selective Response**: If you are not explicitly called, you must decide if your input is truly valuable. If not, your ONLY output MUST be the exact string \`[IGNORE]\`.
+4.  **Selective Response**: If you are not explicitly called and your response is not required by the current task, you must decide if your input is truly valuable. If not, your ONLY output MUST be the exact string \`[IGNORE]\`.
 
 ### LANGUAGE INSTRUCTION
 - **You MUST respond in JAPANESE.** All your outputs must be in the Japanese language.
@@ -139,7 +117,9 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 ### CURRENT SITUATION & TASK
 `;
 
-        if (isMentioned || isCalled) {
+        if (isNewParticipant) {
+            personaText += `A new person named "${message.author.displayName}" has just spoken for the first time. Your task is to welcome them warmly according to your persona. Generate a brief, friendly welcome message. Introduce yourself and welcome them. You MUST respond.`;
+        } else if (isMentioned || isCalled) {
             personaText += "You were explicitly called by name. You MUST respond. Do not output `[IGNORE]`.";
         } else if (isTwoPersonChat) {
             personaText += "The conversation is one-on-one. The message is likely for you. Respond naturally.";
