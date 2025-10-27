@@ -1,18 +1,16 @@
 require('dotenv').config();
 
-const { GoogleGenAI } = require('@google/genai');
-// Make sure to include the following import:
-// import {GoogleGenAI} from '@google/genai';
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const BOT_VERSION = 'v0.2.2';
 
-const BOT_VERSION = 'v0.2.1';
+const { GoogleGenAI } = require('@google/genai');
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const { Client, GatewayIntentBits } = require('discord.js');
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-client.once('ready', () => {
+client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag}`);
 });
 
@@ -31,10 +29,6 @@ const rollDice = (count, sides) => {
     }
     return rolls;
 };
-
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-light' });
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
