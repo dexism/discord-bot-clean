@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const BOT_VERSION = 'v0.5.2';
+const BOT_VERSION = 'v0.6.0';
 
 const { GoogleGenAI } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -51,6 +51,37 @@ const getParticipants = (historyContents) => {
         }
     }
     return participants;
+};
+
+/**
+ * レート制限エラーを考慮し、指数関数的バックオフとジッターを用いて
+ * APIリクエストをリトライするラッパー関数。
+ * @param {object} request - ai.models.generateContentに渡すリクエストオブジェクト
+ * @param {number} maxRetries - 最大リトライ回数
+ * @returns {Promise<any>} - APIからのレスポンス
+ */
+const generateContentWithRetry = async (request, maxRetries = 5) => {
+    let lastError = null;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await ai.models.generateContent(request);
+            return response; // 成功したらレスポンスを返す
+        } catch (error) {
+            lastError = error;
+            // エラーがレート制限（HTTPステータス 429）であるかを確認
+            if (error.toString().includes('429')) {
+                const delay = (2 ** i) * 1000 + Math.random() * 1000; // 指数関数的バックオフ + ジッター
+                console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${i + 1}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // レート制限以外のエラーは即座にスローする
+                throw error;
+            }
+        }
+    }
+    // すべてのリトライが失敗した場合
+    console.error("All retries failed.");
+    throw lastError;
 };
 
 client.on('messageCreate', async message => {
@@ -136,11 +167,13 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 
         const persona = { parts: [{ text: personaText }] };
 
-        const response = await ai.models.generateContent({
+        // 直接APIを呼び出す代わりに、リトライ機能付きのラッパー関数を使用する
+        const request = {
             model: 'gemini-2.5-flash-lite',
             contents: channelHistory.contents,
             systemInstruction: persona
-        });
+        };
+        const response = await generateContentWithRetry(request);
         
         const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '[IGNORE]';
 
