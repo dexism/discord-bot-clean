@@ -1,9 +1,10 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v0.9.1
+// TRPGサポートDiscordボット "ノエル" v0.9.2
 // =================================================================================
 
 // 必要なライブラリを読み込む
-require('dotenv').config(); // .envファイルから環境変数を読み込む
+require('dotenv').config(); // .envファイルはgitせずRenderの環境変数を読み込む
+
 const { GoogleGenAI } = require('@google/genai'); // Google AI
 const { Client, GatewayIntentBits } = require('discord.js'); // Discord.js
 const { GoogleSpreadsheet } = require('google-spreadsheet'); // Googleスプレッドシート連携
@@ -11,8 +12,8 @@ const { JWT } = require('google-auth-library'); // Google認証
 const express = require('express'); // Renderのスリープ対策用Webサーバー
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v0.9.1';
-const BOT_NAMES = ['ノエル', 'ボット', 'bot'];
+const BOT_VERSION = 'v0.9.2';
+const BOT_NAMES = ['ノエル', 'ボット', 'bot']; // 将来的に使用をやめる
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000; // 履歴のリセット時間（1時間）
 
