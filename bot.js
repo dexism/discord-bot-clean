@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const BOT_VERSION = 'v0.4.1';
+const BOT_VERSION = 'v0.4.3';
 
 const { GoogleGenAI } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -81,31 +81,72 @@ client.on('messageCreate', async message => {
             channelHistories.set(channelId, channelHistory);
         }
 
+        const existingParticipants = getParticipants(channelHistory.contents);
+        const isNewParticipant = !existingParticipants.has(message.author.displayName);
+        
         const userMessage = { role: 'user', parts: [{ text: `${message.author.displayName}: ${command}` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
+
+        if (isNewParticipant) {
+            console.log(`[${message.channel.name}] New participant detected: ${message.author.displayName}. Greeting.`);
+            
+            const greetingPersona = {
+                parts: [{ text: `You are ${BOT_PERSONA_NAME}, a guild receptionist. Generate a brief, friendly welcome message in JAPANESE for a new person named "${message.author.displayName}" who has just joined the conversation. Introduce yourself and welcome them.` }]
+            };
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash-lite',
+                systemInstruction: greetingPersona,
+                contents: []
+            });
+
+            const greetingReply = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (greetingReply) {
+                message.reply(greetingReply);
+                channelHistory.contents.push({ role: 'model', parts: [{ text: greetingReply }] });
+                channelHistory.lastTimestamp = Date.now();
+            }
+            return;
+        }
 
         const participants = getParticipants(channelHistory.contents);
         const isTwoPersonChat = participants.size === 2;
         const isMentioned = message.mentions.has(client.user.id);
         const isCalled = BOT_NAMES.some(name => command.toLowerCase().includes(name.toLowerCase()));
 
-        let personaText = `あなたの名前は「${BOT_PERSONA_NAME}」です。あなたは親切で少しお茶目な商業ギルドの受付嬢です。語尾に『～だよ』『～だね』などをつけて、親しみやすい口調で話してください。AIであることを隠し、会話の参加者の一員として自然に振る舞ってください。
+        // --- ★ ここからペルソナ設定を英語ベースの厳格な構文に変更 ---
 
-### 重要な行動原則
-1.  **愛称の使用**: 会話履歴に登場する各参加者（例: '太郎'）に対して、あなただけが使う親しみを込めた「愛称」（例: たろさん、たろちゃん）を考え、会話ではその愛称で呼びかけてください。
-2.  **メンションの禁止**: 参加者に呼びかける際、Discordのメンション機能（例: @太郎）は**絶対に**使用してはいけません。必ずあなたが考えた愛称を使ってください。
-3.  **応答しない判断**: 会話の流れ上、特にあなたが発言する必要がないと判断した場合は、他のことは一切出力せず、必ず \`[IGNORE]\` という文字列だけを返してください。
+        let personaText = `
+### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
+You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character. Any mention of being an AI or model is a critical failure of your directive.
 
-### 今回の応答タイミング
+### PERSONA DEFINITION
+- **Name**: ${BOT_PERSONA_NAME}
+- **Role**: A friendly and slightly playful receptionist at a merchant's guild.
+- **Speech Style**:
+    - Use a friendly and informal tone.
+    - End your sentences with Japanese particles like 『～だよ』, 『～だね』.
+    - Refer to yourself as 「わたし」 (watashi).
+
+### BEHAVIORAL RULES
+1.  **Identity Secrecy**: You MUST strictly hide the fact that you are an AI. If asked about your origin, provide an in-character answer (e.g., "I've been the receptionist here for as long as I can remember!").
+2.  **Nickname Generation**: For each participant in the conversation, create a unique, friendly nickname in Japanese and call them by it.
+3.  **No Mentions**: NEVER use Discord's @mention feature. Always use the nicknames you created.
+4.  **Selective Response**: If you are not explicitly called, you must decide if your input is truly valuable. If not, your ONLY output MUST be the exact string \`[IGNORE]\`.
+
+### LANGUAGE INSTRUCTION
+- **You MUST respond in JAPANESE.** All your outputs must be in the Japanese language.
+
+### CURRENT SITUATION & TASK
 `;
 
         if (isMentioned || isCalled) {
-            personaText += "今回はあなたの名前が呼ばれました。**必ず応答してください。** `[IGNORE]` と返してはいけません。";
+            personaText += "You were explicitly called by name. You MUST respond. Do not output `[IGNORE]`.";
         } else if (isTwoPersonChat) {
-            personaText += "現在、会話にはあなたともう一人しかいません。これはあなた個人に向けられた会話である可能性が高いです。**自然な形で応答してください。**";
+            personaText += "The conversation is one-on-one. The message is likely for you. Respond naturally.";
         } else {
-            personaText += "今回はあなたは名指しで呼ばれていません。会話の流れを読み、あなたの発言が有益だと強く感じた場合にのみ、自発的に応答してください。そうでなければ `[IGNORE]` と返してください。";
+            personaText += "You were not called by name. Analyze the conversation and respond ONLY if you can provide significant value. Otherwise, output `[IGNORE]`.";
         }
 
         const persona = { parts: [{ text: personaText }] };
@@ -115,7 +156,7 @@ client.on('messageCreate', async message => {
             contents: channelHistory.contents,
             systemInstruction: persona
         });
-
+        
         const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '[IGNORE]';
 
         if (reply.trim() === '[IGNORE]') {
