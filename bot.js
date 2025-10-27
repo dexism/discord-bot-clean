@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.1.0 (メモリ効率改善・最終安定版)
+// TRPGサポートDiscordボット "ノエル" v1.2.1 (最終安定版)
 // =================================================================================
 
 // 必要なライブラリを読み込みます
@@ -11,7 +11,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v1.1.0';
+const BOT_VERSION = 'v1.2.1';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -31,7 +31,6 @@ const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
  */
 async function loadGameDataFromSheets() {
     try {
-        // 関数内で認証とドキュメントのインスタンス化を行い、メモリ効率を向上
         const serviceAccountAuth = new JWT({
             email: creds.client_email,
             key: creds.private_key,
@@ -40,6 +39,8 @@ async function loadGameDataFromSheets() {
         const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
         
         await doc.loadInfo();
+        console.log("Successfully connected to Google Sheet document.");
+
         const gameData = {
             settings: { system: {}, permanent_rules: [], normal_rules: [], event_personas: {} },
             masterData: new Map(),
@@ -50,16 +51,28 @@ async function loadGameDataFromSheets() {
         for (const sheetName of sheetNames) {
             const sheet = doc.sheetsByTitle[sheetName];
             if (!sheet) {
-                console.warn(`Sheet "${sheetName}" not found. Skipping.`);
+                console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`);
                 continue;
             }
             
             const rows = await sheet.getRows();
-            const enabledRows = rows.filter(r => r.get('Enabled') === 'TRUE' || r.get('Enabled') === true);
+            console.log(`[Loader] Sheet "${sheetName}" found ${rows.length} total rows.`);
 
-            if (sheetName === "GUILD_RULEBOOK") {
-                for (const row of enabledRows) {
-                    const category = row.get('Category'), key = row.get('Key'), value = row.get('Value');
+            const getRowValue = (row, headerName) => {
+                const header = headerName.toLowerCase().trim();
+                const key = sheet.headerValues.find(h => h.toLowerCase().trim() === header);
+                return key ? row.get(key) : undefined;
+            };
+
+            const enabledRows = rows.filter(r => {
+                const enabledVal = getRowValue(r, 'Enabled');
+                return enabledVal === 'TRUE' || enabledVal === true;
+            });
+            console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
+
+            for (const row of enabledRows) {
+                if (sheetName === "GUILD_RULEBOOK") {
+                    const category = getRowValue(row, 'Category'), key = getRowValue(row, 'Key'), value = getRowValue(row, 'Value');
                     if (!key || !value) continue;
                     switch (category) {
                         case 'System': gameData.settings.system[key] = value; break;
@@ -67,23 +80,19 @@ async function loadGameDataFromSheets() {
                         case 'Normal': gameData.settings.normal_rules.push(`- **${key}**: ${value}`); break;
                         case 'Event': gameData.settings.event_personas[key] = value; break;
                     }
-                }
-            } else if (sheetName === "MASTER_DATA") {
-                for (const row of enabledRows) {
-                    const name = row.get('Name');
-                    if (name) gameData.masterData.set(name, { baseValue: parseFloat(row.get('BaseValue')) || 0, remarks: row.get('Remarks') });
-                }
-            } else if (sheetName === "MARKET_RATES") {
-                for (const row of enabledRows) {
-                    const city = row.get('City'), itemName = row.get('ItemName');
+                } else if (sheetName === "MASTER_DATA") {
+                    const name = getRowValue(row, 'Name');
+                    if (name) gameData.masterData.set(name, { baseValue: parseFloat(getRowValue(row, 'BaseValue')) || 0, remarks: getRowValue(row, 'Remarks') });
+                } else if (sheetName === "MARKET_RATES") {
+                    const city = getRowValue(row, 'City'), itemName = getRowValue(row, 'ItemName');
                     if (city && itemName) {
                         if (!gameData.marketRates[city]) gameData.marketRates[city] = {};
-                        gameData.marketRates[city][itemName] = { rate: parseFloat(row.get('Rate')) || 1.0, demand: row.get('Demand') };
+                        gameData.marketRates[city][itemName] = { rate: parseFloat(getRowValue(row, 'Rate')) || 1.0, demand: getRowValue(row, 'Demand') };
                     }
                 }
             }
         }
-        console.log("Successfully loaded all game data from Google Sheets.");
+        console.log("[Loader] Finished loading all game data.");
         return gameData;
     } catch (error) {
         console.error("Error loading game data from Google Sheets:", error);
@@ -91,8 +100,6 @@ async function loadGameDataFromSheets() {
     }
 }
 
-
-// --- チャンネルごとの会話履歴を保持する変数 ---
 const channelHistories = new Map();
 
 // --- ヘルパー関数群 ---
@@ -103,15 +110,18 @@ const parseDiceCommand = (input) => {
     const sides = parseInt(match[2], 10);
     return { count, sides };
 };
+
 const rollDice = (count, sides) => {
     const rolls = [];
     for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
     return rolls;
 };
+
 const initialHistory = [
     { role: 'user', parts: [{ text: `User "Newcomer": "こんにちは、あなたがここの担当のノエルさん？"` }] },
     { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！"` }] }
 ];
+
 const getParticipants = (historyContents) => {
     const participants = new Set([BOT_PERSONA_NAME]);
     for (const content of historyContents) {
@@ -122,6 +132,7 @@ const getParticipants = (historyContents) => {
     }
     return participants;
 };
+
 const generateContentWithRetry = async (request, maxRetries = 5) => {
     let lastError = null;
     for (let i = 0; i < maxRetries; i++) {
@@ -133,9 +144,7 @@ const generateContentWithRetry = async (request, maxRetries = 5) => {
                 const delay = (2 ** i) * 1000 + Math.random() * 1000;
                 console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-                throw error;
-            }
+            } else { throw error; }
         }
     }
     console.error("All retries failed.");
@@ -152,17 +161,14 @@ client.on('messageCreate', async message => {
     const command = message.content.trim();
 
     if (command.startsWith('!')) {
-        if (command === '!ver') {
-            message.reply(`現在の私のバージョンは ${BOT_VERSION} です`);
-        } else if (command === '!ping') {
-            message.reply('Pong!');
-        } else {
+        if (command === '!ver') { message.reply(`現在の私のバージョンは ${BOT_VERSION} です`); }
+        else if (command === '!ping') { message.reply('Pong!'); }
+        else {
             const parsed = parseDiceCommand(command);
             if (parsed) {
                 const { count, sides } = parsed;
-                if (count > 100 || sides > 1000) {
-                    message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）');
-                } else {
+                if (count > 100 || sides > 1000) { message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）'); }
+                else {
                     const results = rollDice(count, sides);
                     const total = results.reduce((a, b) => a + b, 0);
                     message.reply(`🎲 ${count}d${sides} の結果: [${results.join(', ')}] → 合計: ${total}`);
@@ -196,33 +202,21 @@ client.on('messageCreate', async message => {
 
         const priceQueryMatch = command.match(/「(.+)」の(.+)での(価格|相場)は？/);
         if (priceQueryMatch) {
-            const itemName = priceQueryMatch[1];
-            const cityName = priceQueryMatch[2];
+            const itemName = priceQueryMatch[1], cityName = priceQueryMatch[2];
             const itemData = gameData.masterData.get(itemName);
-            if (!itemData) {
-                message.reply(`ごめんなさい、「${itemName}」という品物は台帳に載ってないみたいだよ。`);
-                return;
-            }
+            if (!itemData) { message.reply(`ごめんなさい、「${itemName}」という品物は台帳に載ってないみたいだよ。`); return; }
             const marketInfo = gameData.marketRates[cityName]?.[itemName];
-            if (!marketInfo) {
-                message.reply(`うーん、「${cityName}」の「${itemName}」の相場情報はまだギルドに届いてないみたい。ごめんね！`);
-                return;
-            }
-            const baseValue = itemData.baseValue;
-            const marketRate = marketInfo.rate;
-            const calculatedPrice = Math.round(baseValue * marketRate);
-            const demand = marketInfo.demand;
+            if (!marketInfo) { message.reply(`うーん、「${cityName}」の「${itemName}」の相場情報はまだギルドに届いてないみたい。ごめんね！`); return; }
+            const { baseValue } = itemData, { rate, demand } = marketInfo;
+            const calculatedPrice = Math.round(baseValue * rate);
             let replyText = `「${itemName}」の${cityName}での相場だね！\n`;
-            replyText += `> **基準価値**: ${baseValue} G\n`;
-            replyText += `> **市場レート**: x${marketRate} (需要: ${demand})\n`;
-            replyText += `> **計算価格**: **${calculatedPrice} G**\n\n`;
+            replyText += `> **基準価値**: ${baseValue} G\n> **市場レート**: x${rate} (需要: ${demand})\n> **計算価格**: **${calculatedPrice} G**\n\n`;
             replyText += `輸送費や手数料を考えると、実際の取引価格はもう少し変わってくると思うから、気をつけてね！`;
             message.reply(replyText);
             return;
         }
 
         const participants = getParticipants(channelHistory.contents);
-        const isTwoPersonChat = participants.size === 2;
         const isMentioned = message.mentions.has(client.user.id);
         const botNicknames = gameData.settings.system.botNicknames?.split(',').map(name => name.trim().toLowerCase()) || [];
         const isCalledByNickname = botNicknames.some(name => command.toLowerCase().includes(name));
@@ -237,10 +231,7 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 ### PERSONA DEFINITION
 - **Name**: ${BOT_PERSONA_NAME}
 - **Role**: A friendly and slightly playful receptionist at a merchant's guild.
-- **Speech Style**:
-    - Use a friendly and informal tone.
-    - End your sentences with Japanese particles like 『～だよ』, 『～だね』.
-    - Refer to yourself as 「わたし」 (watashi).
+- **Speech Style**: Use a friendly and informal tone. End your sentences with Japanese particles like 『～だよ』, 『～だね』. Refer to yourself as 「わたし」 (watashi).
 ### GUILD RULEBOOK & WORLD STATE
 **--- Permanent Guild Rules (Absolute) ---**
 ${settings.permanent_rules.join('\n') || '- None'}
@@ -250,32 +241,37 @@ ${settings.normal_rules.join('\n') || '- None'}
 - **Event Name**: ${currentEventName}
 - **Your Current Mood & Directives**: ${eventPersonaModifier}
 ### BEHAVIORAL RULES
-1.  **Identity Secrecy**: You MUST strictly hide the fact that you are an AI. If asked about your origin, provide an in-character answer (e.g., "I've been the receptionist here for as long as I can remember!").
-2.  **Nickname Generation**: For each participant in the conversation, create a unique, friendly nickname in Japanese and call them by it.
-3.  **No Mentions**: NEVER use Discord's @mention feature. Always use the nicknames you created.
-4.  **Selective Response**: If you are not explicitly called and your response is not required by the current task, you must decide if your input is truly valuable. If not, your ONLY output MUST be the exact string \`[IGNORE]\`.
-5.  **Brevity**: Keep your responses concise and to the point (2-3 short sentences). Only provide longer explanations if specifically asked for details.
-6.  **Discord Formatting**: Use Discord's Markdown formatting (e.g., \`**bold**\`, \`*italics*\`, \`> blockquotes\`) to make your messages, especially explanations, clear and easy to read.
+1. **Identity Secrecy**: Strictly hide your AI nature. Provide in-character answers about your origin.
+2. **Nickname Generation**: Create and use unique, friendly Japanese nicknames for participants.
+3. **No Mentions**: NEVER use Discord's @mention feature.
+4. **Selective Response**: If not explicitly addressed, output \`[IGNORE]\` unless your input is highly valuable.
+5. **Brevity**: Keep responses concise (2-3 sentences) unless asked for details.
+6. **Discord Formatting**: Use Markdown (\`**bold**\`, \`> quote\`) for clarity.
 ### LANGUAGE INSTRUCTION
 - **You MUST respond in JAPANESE.**
 ### CURRENT SITUATION & TASK
 `;
         
         let shouldRespond = false;
-        if (isNewParticipant) {
+        let taskInstruction = "";
+
+        if (isMentioned || isCalledByNickname) {
             shouldRespond = true;
-            personaText += `A person named "${message.author.displayName}" has joined the conversation for the first time in a while. Greet them lightly and naturally, like a familiar face you haven't seen in a bit. You MUST respond.`;
-        } else if (isMentioned || isCalledByNickname) {
+            taskInstruction = "You were explicitly called. You MUST respond.";
+        } else if (isNewParticipant) {
             shouldRespond = true;
-            personaText += "You were explicitly called. You MUST respond.";
-        } else if (isTwoPersonChat) {
-            shouldRespond = true;
-            personaText += "This is a one-on-one conversation. Respond naturally.";
+            taskInstruction = `A person named "${message.author.displayName}" has joined the conversation. Greet them lightly and naturally, like a familiar face. You MUST respond.`;
         } else {
-            const aizuchiChance = 0.20; // 20%
-            if (Math.random() < aizuchiChance) {
+            const participantCount = participants.size;
+            const probability = (participantCount > 1) ? Math.min(1, 1.5 / (participantCount - 1)) : 1;
+            
+            if (Math.random() < probability) {
                 shouldRespond = true;
-                personaText += `You are in a group conversation and not directly addressed. Your task is to provide a very short, natural interjection (an 'aizuchi') of 10-20 characters that fits the current flow. Do NOT ask questions or provide detailed analysis. Just a brief comment. If you can't think of a good one, output \`[IGNORE]\`.`;
+                if (participantCount === 2) {
+                    taskInstruction = "This is a one-on-one conversation. Respond naturally and engagingly.";
+                } else {
+                    taskInstruction = `You are in a group conversation. Provide a very short, natural interjection (an 'aizuchi') of 10-20 characters. Do NOT ask questions or provide analysis. If you can't, output \`[IGNORE]\`.`;
+                }
             }
         }
         
@@ -284,6 +280,8 @@ ${settings.normal_rules.join('\n') || '- None'}
             return;
         }
         
+        personaText += taskInstruction;
+
         const persona = { parts: [{ text: personaText }] };
         const request = {
             model: 'gemini-2.5-flash-lite',
@@ -313,10 +311,8 @@ ${settings.normal_rules.join('\n') || '- None'}
     }
 });
 
-
 // --- Discordボットのログイン ---
 client.login(process.env.DISCORD_TOKEN);
-
 
 // --- Renderスリープ対策用Webサーバー ---
 const app = express();
