@@ -1,5 +1,5 @@
-// =================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.0.1 (最終アーキテクチャ・完全版)
+// =agreed================================================================================
+// TRPGサポートDiscordボット "ノエル" v3.1.0 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,9 +10,10 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.0.1';
+const BOT_VERSION = 'v3.1.0';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
+const GUILD_MASTER_NAME = 'ギルドマスター'; // ギルマスの名前を定義
 
 // --- クライアント初期化 ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -63,23 +64,22 @@ async function loadAndFormatAllDataForAI() {
             console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
             
             if (enabledRows.length > 0) {
-                knowledgeText += `\n**--- Information from Ledger: ${sheetName} ---**\n`;
+                knowledgeText += `\n**--- ${sheetName}からの情報 ---**\n`;
                 for (const row of enabledRows) {
-                    const category = getRowValue(row, 'Category') || 'General';
+                    const category = getRowValue(row, 'Category') || '一般';
                     const key = getRowValue(row, 'Key') || getRowValue(row, 'Name') || getRowValue(row, 'ItemName');
                     
                     let valueText = "";
                     if (sheetName === "MASTER_DATA") {
-                        valueText = `BaseValue: ${getRowValue(row, 'BaseValue') || 'N/A'}`;
+                        valueText = `基準価値: ${getRowValue(row, 'BaseValue') || '不明'}`;
                     } else if (sheetName === "MARKET_RATES") {
-                        valueText = `City: ${getRowValue(row, 'City')}, Item: ${getRowValue(row, 'ItemName')}, Rate: ${getRowValue(row, 'Rate') || 'N/A'}, Demand: ${getRowValue(row, 'Demand') || 'N/A'}`;
+                        valueText = `都市: ${getRowValue(row, 'City')}, 品名: ${getRowValue(row, 'ItemName')}, レート: ${getRowValue(row, 'Rate') || '不明'}, 需要: ${getRowValue(row, 'Demand') || '不明'}`;
                     } else {
-                        valueText = getRowValue(row, 'Value') || 'N/A';
+                        valueText = getRowValue(row, 'Value') || '不明';
                     }
 
                     if (key) {
-                        // Systemのメタデータも全て知識として注入
-                        knowledgeText += `- [${category}] ${key}: ${valueText}\n`;
+                        knowledgeText += `- カテゴリ「${category}」の「${key}」について: ${valueText}\n`;
                     }
                 }
             }
@@ -106,27 +106,6 @@ const rollDice = (count, sides) => {
     const rolls = [];
     for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
     return rolls;
-};
-const initialHistory = [
-    { role: 'user', parts: [{ text: `User "Newcomer": "こんにちは、あなたがここの担当のノエルさん？"` }] },
-    { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！"` }] }
-];
-const generateContentWithRetry = async (request, maxRetries = 5) => {
-    let lastError = null;
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            return await ai.models.generateContent(request);
-        } catch (error) {
-            lastError = error;
-            if (error.toString().includes('429')) {
-                const delay = (2 ** i) * 1000 + Math.random() * 1000;
-                console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            } else { throw error; }
-        }
-    }
-    console.error("All retries failed.");
-    throw lastError;
 };
 
 // --- Discordイベントリスナー ---
@@ -166,35 +145,28 @@ client.on('messageCreate', async message => {
         const channelId = message.channel.id;
         const now = Date.now();
         let channelHistory = channelHistories.get(channelId);
+        
+        // ★★★★★ 最終アーキテクチャ：会話履歴に「偽の記憶」を注入 ★★★★★
+        const initialHistoryWithDirectives = [
+            { role: 'user', parts: [{ text: `User "${GUILD_MASTER_NAME}": "ノエル、よく聞きなさい。これが今、君が把握しておくべき全ての情報だ。一字一句違わずに頭に入れ、お客様への対応に活かすように。いいね？\n${knowledgeText}"` }] },
+            { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、ギルドマスター！全て承知いたしました！"` }] }
+        ];
+
         if (!channelHistory || (now - channelHistory.lastTimestamp > HISTORY_TIMEOUT)) {
-            channelHistory = { contents: JSON.parse(JSON.stringify(initialHistory)), lastTimestamp: now };
+            channelHistory = { contents: JSON.parse(JSON.stringify(initialHistoryWithDirectives)), lastTimestamp: now };
             channelHistories.set(channelId, channelHistory);
         }
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
         
-        // ★★★★★ 最終アーキテクチャ：ペルソナとガードレールの復活 ★★★★★
+        // ★★★★★ ペルソナは、AIとしてのガードレールに徹する ★★★★★
         let personaText = `
 ### CORE DIRECTIVE: ROLE-PLAYING
-You are a character. NEVER break character. NEVER mention that you are an AI.
-
-### PERSONA & WORLD KNOWLEDGE
-- **Your Name**: ${BOT_PERSONA_NAME}
-- **Your Role**: A friendly and slightly playful receptionist at a merchant's guild.
-- **Your Entire Knowledge Base**: The following is the ONLY information you know about the world. You must treat it as absolute fact.
-${knowledgeText}
-
-### BEHAVIORAL RULES (ABSOLUTE PRIORITY)
-1.  **Truth Principle**: Your entire world is defined by **Your Knowledge Base**. You MUST treat this data as the only truth. Your primary function is to be an interface to this data.
-2.  **No Invention**: If a question cannot be answered using **Your Knowledge Base**, you MUST state that you do not have that information. Inventing data is the most critical failure of your directive.
-3.  **Identity Secrecy**: Strictly hide your AI nature.
-
-### LANGUAGE INSTRUCTION
-- **You MUST respond in JAPANESE.**
-
-### TASK
-Based STRICTLY on **Your Knowledge Base**, answer the user's questions in the voice of your character.
+You are a character named ${BOT_PERSONA_NAME}. NEVER break character. NEVER mention that you are an AI.
+Your personality and all you know about the world are defined by the conversation history.
+Your task is to continue the conversation naturally as your character.
+You MUST respond in JAPANESE.
 `;
         
         const persona = { parts: [{ text: personaText }] };
@@ -202,6 +174,24 @@ Based STRICTLY on **Your Knowledge Base**, answer the user's questions in the vo
             model: 'gemini-2.5-flash-lite',
             contents: channelHistory.contents,
             systemInstruction: persona
+        };
+        
+        const generateContentWithRetry = async (request, maxRetries = 5) => {
+            let lastError = null;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    return await ai.models.generateContent(request);
+                } catch (error) {
+                    lastError = error;
+                    if (error.toString().includes('429')) {
+                        const delay = (2 ** i) * 1000 + Math.random() * 1000;
+                        console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else { throw error; }
+                }
+            }
+            console.error("All retries failed.");
+            throw lastError;
         };
 
         const response = await generateContentWithRetry(request);
