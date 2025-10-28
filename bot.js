@@ -21,10 +21,6 @@ const client = new Client({
 const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
-/**
- * ★★★★★ 新設計：全てのシートから全データを読み込み、単一のテキストブロックに変換する関数 ★★★★★
- * @returns {Promise<{knowledgeText: string, systemSettings: object}|null>}
- */
 async function loadAndFormatAllDataForAI() {
     try {
         const serviceAccountAuth = new JWT({
