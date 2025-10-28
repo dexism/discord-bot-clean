@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.5.0 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v1.5.1 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -9,7 +9,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.5.0';
+const BOT_VERSION = 'v1.5.1';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -63,6 +63,10 @@ async function loadGameDataFromSheets() {
 
                     if (category === 'System') {
                         gameData.settings.system[key] = value;
+                        // ★★★★★ 修正点：Systemカテゴリのルールもall_rulesに追加する ★★★★★
+                        if (key !== 'currentEvent' && key !== 'botNicknames') {
+                            gameData.settings.all_rules.push(`[${category}] ${value}`);
+                        }
                     } else if (category === 'Event') {
                         gameData.settings.event_personas[key] = value;
                     } else {
@@ -211,6 +215,7 @@ client.on('messageCreate', async message => {
         const eventPersonaModifier = settings.event_personas[currentEventName] || "平常心でいる。";
         const worldKnowledge = formatGameDataForAI(gameData);
 
+        // ★★★★★ 修正点：ペルソナの構造を最終形に ★★★★★
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
 You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character.
