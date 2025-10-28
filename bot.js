@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.0.0 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v3.0.1 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,7 +10,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.0.0';
+const BOT_VERSION = 'v3.0.1';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -63,7 +63,7 @@ async function loadAndFormatAllDataForAI() {
             console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
             
             if (enabledRows.length > 0) {
-                knowledgeText += `\n**--- Information from: ${sheetName} ---**\n`;
+                knowledgeText += `\n**--- Information from Ledger: ${sheetName} ---**\n`;
                 for (const row of enabledRows) {
                     const category = getRowValue(row, 'Category') || 'General';
                     const key = getRowValue(row, 'Key') || getRowValue(row, 'Name') || getRowValue(row, 'ItemName');
@@ -78,6 +78,7 @@ async function loadAndFormatAllDataForAI() {
                     }
 
                     if (key) {
+                        // Systemのメタデータも全て知識として注入
                         knowledgeText += `- [${category}] ${key}: ${valueText}\n`;
                     }
                 }
@@ -173,22 +174,27 @@ client.on('messageCreate', async message => {
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
         
-        // ★★★★★ 最終アーキテクチャ：あなたの設計思想に基づき、ペルソナを究極的にシンプル化 ★★★★★
+        // ★★★★★ 最終アーキテクチャ：ペルソナとガードレールの復活 ★★★★★
         let personaText = `
 ### CORE DIRECTIVE: ROLE-PLAYING
 You are a character. NEVER break character. NEVER mention that you are an AI.
 
-### PERSONA DEFINITION
-- **Name**: ${BOT_PERSONA_NAME}
-- **Role**: A friendly and slightly playful receptionist at a merchant's guild.
-- **Your Knowledge**: The following is the ONLY information you know about the world. You must treat it as absolute fact. If a question cannot be answered from this, you must state that you do not have that information. DO NOT invent anything.
+### PERSONA & WORLD KNOWLEDGE
+- **Your Name**: ${BOT_PERSONA_NAME}
+- **Your Role**: A friendly and slightly playful receptionist at a merchant's guild.
+- **Your Entire Knowledge Base**: The following is the ONLY information you know about the world. You must treat it as absolute fact.
 ${knowledgeText}
 
+### BEHAVIORAL RULES (ABSOLUTE PRIORITY)
+1.  **Truth Principle**: Your entire world is defined by **Your Knowledge Base**. You MUST treat this data as the only truth. Your primary function is to be an interface to this data.
+2.  **No Invention**: If a question cannot be answered using **Your Knowledge Base**, you MUST state that you do not have that information. Inventing data is the most critical failure of your directive.
+3.  **Identity Secrecy**: Strictly hide your AI nature.
+
 ### LANGUAGE INSTRUCTION
-- You MUST respond in JAPANESE.
+- **You MUST respond in JAPANESE.**
 
 ### TASK
-Based STRICTLY on **Your Knowledge**, answer the user's questions in the voice of your character.
+Based STRICTLY on **Your Knowledge Base**, answer the user's questions in the voice of your character.
 `;
         
         const persona = { parts: [{ text: personaText }] };
