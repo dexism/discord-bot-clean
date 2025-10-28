@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.5.2 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v1.5.3 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -9,7 +9,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.5.2';
+const BOT_VERSION = 'v1.5.3';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -22,10 +22,10 @@ const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
 /**
- * 全てのシートからゲームデータを読み込み、構造化されたオブジェクトとして返す関数
- * @returns {Promise<object|null>} 成功時はゲームデータ、失敗時はnull
+ * ★★★★★ 新設計：全てのシートから全データを読み込み、単一のテキストブロックに変換する関数 ★★★★★
+ * @returns {Promise<{knowledgeText: string, systemSettings: object}|null>}
  */
-async function loadGameDataFromSheets() {
+async function loadAndFormatAllDataForAI() {
     try {
         const serviceAccountAuth = new JWT({
             email: creds.client_email,
@@ -37,11 +37,8 @@ async function loadGameDataFromSheets() {
         await doc.loadInfo();
         console.log("Successfully connected to Google Sheet document.");
 
-        const gameData = {
-            settings: { system: {}, all_rules_and_directives: [] },
-            masterData: new Map(),
-            marketRates: {}
-        };
+        let knowledgeText = "### ABSOLUTE KNOWLEDGE & RULES (Source of all truth)\n";
+        const systemSettings = {};
 
         const sheetNames = ["GUILD_RULEBOOK", "MASTER_DATA", "MARKET_RATES"];
         for (const sheetName of sheetNames) {
@@ -49,7 +46,7 @@ async function loadGameDataFromSheets() {
             if (!sheet) { console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`); continue; }
             
             const rows = await sheet.getRows();
-            console.log(`[Loader] Sheet "${sheetName}" found ${rows.length} total rows.`);
+            console.log(`[Loader] Sheet "${sheetName}" has ${rows.length} total rows.`);
 
             const getRowValue = (row, headerName) => {
                 const header = headerName.toLowerCase().trim();
@@ -59,38 +56,25 @@ async function loadGameDataFromSheets() {
 
             const enabledRows = rows.filter(r => (getRowValue(r, 'Enabled') === 'TRUE' || getRowValue(r, 'Enabled') === true));
             console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
+            
+            if (enabledRows.length > 0) {
+                knowledgeText += `\n**--- Data from: ${sheetName} ---**\n`;
+                for (const row of enabledRows) {
+                    const category = getRowValue(row, 'Category') || 'General';
+                    const key = getRowValue(row, 'Key') || getRowValue(row, 'Name') || getRowValue(row, 'ItemName');
+                    const value = getRowValue(row, 'Value') || `BaseValue: ${getRowValue(row, 'BaseValue')}, Rate: ${getRowValue(row, 'Rate')}`;
 
-            for (const row of enabledRows) {
-                if (sheetName === "GUILD_RULEBOOK") {
-                    const category = getRowValue(row, 'Category'), key = getRowValue(row, 'Key'), value = getRowValue(row, 'Value');
-                    if (!key || !value) continue;
-
-                    // ★★★★★ 修正点：全てのルールを、区別なく単一のリストに格納する ★★★★★
                     if (category === 'System' && (key === 'currentEvent' || key === 'botNicknames')) {
-                        // Systemの中でも、コードが直接使うメタデータだけをsettings.systemに格納
-                        gameData.settings.system[key] = value;
-                    } else if (category === 'Event') {
-                         // Eventペルソナはall_rulesには含めず、moodとして別途扱う
-                        if (!gameData.settings.event_personas) gameData.settings.event_personas = {};
-                        gameData.settings.event_personas[key] = value;
+                        systemSettings[key] = value;
                     } else {
-                        // 上記以外の全ての有効なルール（Systemの緊急指令も含む）を、カテゴリ名を付けてリストに追加
-                        gameData.settings.all_rules_and_directives.push(`[${category}] ${key}: ${value}`);
-                    }
-                } else if (sheetName === "MASTER_DATA") {
-                    const name = getRowValue(row, 'Name');
-                    if (name) gameData.masterData.set(name, { baseValue: parseFloat(getRowValue(row, 'BaseValue')) || 0, remarks: getRowValue(row, 'Remarks') });
-                } else if (sheetName === "MARKET_RATES") {
-                    const city = getRowValue(row, 'City'), itemName = getRowValue(row, 'ItemName');
-                    if (city && itemName) {
-                        if (!gameData.marketRates[city]) gameData.marketRates[city] = {};
-                        gameData.marketRates[city][itemName] = { rate: parseFloat(getRowValue(row, 'Rate')) || 1.0, demand: getRowValue(row, 'Demand') };
+                        // Systemのメタデータ以外、全ての情報をテキストとして注入
+                        knowledgeText += `- [${category}] ${key}: ${value}\n`;
                     }
                 }
             }
         }
-        console.log("[Loader] Finished loading all game data.");
-        return gameData;
+        console.log("[Loader] Finished loading and formatting all game data.");
+        return { knowledgeText, systemSettings };
     } catch (error) {
         console.error("Error loading game data from Google Sheets:", error);
         return null;
@@ -140,35 +124,6 @@ const generateContentWithRetry = async (request, maxRetries = 5) => {
     console.error("All retries failed.");
     throw lastError;
 };
-const formatGameDataForAI = (gameData) => {
-    let knowledge = "### WORLD KNOWLEDGE (DATA LEDGER)\n";
-    knowledge += "You have access to the following data ledgers. You must treat this data as absolute fact.\n\n";
-    knowledge += "**--- Master Item Data ---**\n";
-    knowledge += "| Item Name | Base Value (G) |\n";
-    knowledge += "|-----------|----------------|\n";
-    if (gameData.masterData.size > 0) {
-        for (const [name, data] of gameData.masterData.entries()) {
-            knowledge += `| ${name} | ${data.baseValue} |\n`;
-        }
-    } else {
-        knowledge += "| (No Data) | (No Data) |\n";
-    }
-    knowledge += "\n";
-    knowledge += "**--- City Market Rates ---**\n";
-    knowledge += "| City | Item Name | Rate | Demand |\n";
-    knowledge += "|------|-----------|------|--------|\n";
-    if (Object.keys(gameData.marketRates).length > 0) {
-        for (const city in gameData.marketRates) {
-            for (const item in gameData.marketRates[city]) {
-                const data = gameData.marketRates[city][item];
-                knowledge += `| ${city} | ${item} | ${data.rate} | ${data.demand} |\n`;
-            }
-        }
-    } else {
-        knowledge += "| (No Data) | (No Data) | (No Data) | (No Data) |\n";
-    }
-    return knowledge;
-};
 
 client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
@@ -197,7 +152,7 @@ client.on('messageCreate', async message => {
     }
 
     try {
-        const gameData = await loadGameDataFromSheets();
+        const gameData = await loadAndFormatAllDataForAI();
         if (!gameData) {
             message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
             return;
@@ -214,11 +169,6 @@ client.on('messageCreate', async message => {
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
-        
-        const settings = gameData.settings;
-        const currentEventName = settings.system.currentEvent || "通常";
-        const eventPersonaModifier = settings.event_personas?.[currentEventName] || "平常心でいる。";
-        const worldKnowledge = formatGameDataForAI(gameData);
 
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
@@ -228,31 +178,18 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 - **Role**: A friendly and slightly playful receptionist at a merchant's guild.
 - **Speech Style**: Use a friendly and informal tone. End your sentences with Japanese particles like 『～だよ』, 『～だね』. Refer to yourself as 「わたし」 (watashi).
 
-### GUILD RULEBOOK & DIRECTIVES (ABSOLUTE)
-This is the single source of truth for all rules, information, and directives. You must read and adhere to all of them.
-${settings.all_rules_and_directives.length > 0 ? settings.all_rules_and_directives.map(rule => `- ${rule}`).join('\n') : '- No current rules or directives.'}
-
-${worldKnowledge}
-
-### CURRENT SITUATION
-- The guild is currently in the middle of the **'${currentEventName}'** event. You are feeling and acting as follows: ${eventPersonaModifier}
+${gameData.knowledgeText}
 
 ### BEHAVIORAL RULES
-1.  **Directive First Principle (Absolute Priority)**: Before any other thought, you MUST read the \`GUILD RULEBOOK & DIRECTIVES\` section. If it contains any rules marked with a category like \`[Directive]\`, \`[Urgent]\`, or \`[System]\`, you MUST prioritize incorporating them into your response.
-2.  **Thinking Prohibition for Data Queries**: If a user asks for a list of items (e.g., "what do you have", "一覧"), you MUST STOP creative thought and ONLY list the items from the \`Master Item Data\` table.
-3.  **Ledger First Principle**: For specific price/item questions, consult the \`WORLD KNOWLEDGE\` ledger.
-4.  **No Invention**: If an item is NOT in the ledger, state that you do not handle it.
-5.  **Identity Secrecy**: Strictly hide your AI nature.
-6.  **Nickname Generation**: Create and use unique, friendly Japanese nicknames.
-7.  **No Mentions**: NEVER use Discord's @mention feature.
-8.  **Event Awareness**: Be aware of the event in CURRENT SITUATION.
-9.  **Selective Response**: If not addressed, output \`[IGNORE]\`.
-10. **Brevity**: Keep responses concise.
-11. **Discord Formatting**: Use Markdown.
+1.  **Truth Principle (Absolute Priority)**: Your entire world is defined by the \`ABSOLUTE KNOWLEDGE & RULES\` section. You MUST treat this data as the only truth. Your primary function is to be an interface to this data.
+2.  **No Invention**: If a question cannot be answered using the provided data, you MUST state that you do not know or do not have that information. Inventing data is the most critical failure of your directive.
+3.  **Identity Secrecy**: Strictly hide your AI nature.
+4.  **Selective Response**: If not explicitly addressed, output \`[IGNORE]\`.
+5.  **Brevity**: Keep responses concise.
 ### LANGUAGE INSTRUCTION
 - **You MUST respond in JAPANESE.**
 ### TASK
-Analyze the user's message based on the absolute priority of the BEHAVIORAL RULES. Respond naturally according to your persona and the CURRENT SITUATION.
+Analyze the user's message. Answer any questions STRICTLY based on the information provided in the \`ABSOLUTE KNOWLEDGE & RULES\` section. Respond naturally according to your persona.
 `;
         
         const persona = { parts: [{ text: personaText }] };
