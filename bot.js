@@ -1,27 +1,36 @@
-// =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.4.5 (最終安定版・思考矯正)
+// =agreed================================================================================
+// TRPGサポートDiscordボット "ノエル" v3.2.0 (動的知識ベース対応版)
 // =================================================================================
 
 require('dotenv').config();
-const { GoogleGenAI } = require('@google/genai');
+// google-genai は @google/generative-ai にパッケージ名が変更されています
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Client, GatewayIntentBits } = require('discord.js');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.4.5';
+// --- ボットの基本設定 ---
+const BOT_VERSION = 'v3.2.0';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
+const GUILD_MASTER_NAME = 'ギルドマスター'; // デフォルトのギルマス名
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// --- クライアント初期化 ---
+const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
+// --- Googleスプレッドシート連携設定 ---
+const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw'; // ユーザー提供のスプレッドシートID
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
-async function loadGameDataFromSheets() {
+/**
+ * 全ての有効なシートからデータを読み込み、AI用の「偽の記憶」会話履歴配列を生成する関数
+ * @returns {Promise<Array<object>|null>}
+ */
+async function loadAndFormatAllDataForAI() {
     try {
         const serviceAccountAuth = new JWT({
             email: creds.client_email,
@@ -33,65 +42,103 @@ async function loadGameDataFromSheets() {
         await doc.loadInfo();
         console.log("Successfully connected to Google Sheet document.");
 
-        const gameData = {
-            settings: { system: {}, permanent_rules: [], normal_rules: [], event_personas: {} },
-            masterData: new Map(),
-            marketRates: {}
-        };
+        const initialHistoryWithDirectives = [];
 
-        const sheetNames = ["GUILD_RULEBOOK", "MASTER_DATA", "MARKET_RATES"];
-        for (const sheetName of sheetNames) {
-            const sheet = doc.sheetsByTitle[sheetName];
-            if (!sheet) { console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`); continue; }
+        // --- 全てのシートを走査 ---
+        for (const sheet of doc.sheetsByIndex) {
+            console.log(`[Loader] Processing sheet: "${sheet.title}"`);
             
+            // --- A1:C1セルを読み込んでシートの有効性と設定を取得 ---
+            await sheet.loadCells('A1:C1');
+            const isSheetEnabled = sheet.getCell(0, 0).value === true; // A1
+            
+            if (!isSheetEnabled) {
+                console.log(`[Loader] Sheet "${sheet.title}" is disabled. Skipping.`);
+                continue;
+            }
+
+            const userName = sheet.getCell(0, 1).value || GUILD_MASTER_NAME; // B1
+            const userMessageTemplate = sheet.getCell(0, 2).value; // C1
+
+            if (!userMessageTemplate) {
+                console.warn(`[Loader] Sheet "${sheet.title}" is enabled but has no message template in C1. Skipping.`);
+                continue;
+            }
+
             const rows = await sheet.getRows();
-            console.log(`[Loader] Sheet "${sheetName}" found ${rows.length} total rows.`);
+            const knowledgeLines = [];
+            const headers = sheet.headerValues; // 2行目がヘッダーになる
 
-            const getRowValue = (row, headerName) => {
-                const header = headerName.toLowerCase().trim();
-                const key = sheet.headerValues.find(h => h.toLowerCase().trim() === header);
-                return key ? row.get(key) : undefined;
-            };
+            for (const row of rows) {
+                // --- A列のチェックボックスでレコードの有効性を判断 ---
+                const isRowEnabled = row.get(headers[0]) === true;
+                if (!isRowEnabled) continue;
 
-            const enabledRows = rows.filter(r => {
-                const enabledVal = getRowValue(r, 'Enabled');
-                return enabledVal === 'TRUE' || enabledVal === true;
-            });
-            console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
-
-            for (const row of enabledRows) {
-                if (sheetName === "GUILD_RULEBOOK") {
-                    const category = getRowValue(row, 'Category'), key = getRowValue(row, 'Key'), value = getRowValue(row, 'Value');
-                    if (!key || !value) continue;
-                    switch (category) {
-                        case 'System': gameData.settings.system[key] = value; break;
-                        case 'Permanent': gameData.settings.permanent_rules.push(value); break;
-                        case 'Normal': gameData.settings.normal_rules.push(`- **${key}**: ${value}`); break;
-                        case 'Event': gameData.settings.event_personas[key] = value; break;
-                    }
-                } else if (sheetName === "MASTER_DATA") {
-                    const name = getRowValue(row, 'Name');
-                    if (name) gameData.masterData.set(name, { baseValue: parseFloat(getRowValue(row, 'BaseValue')) || 0, remarks: getRowValue(row, 'Remarks') });
-                } else if (sheetName === "MARKET_RATES") {
-                    const city = getRowValue(row, 'City'), itemName = getRowValue(row, 'ItemName');
-                    if (city && itemName) {
-                        if (!gameData.marketRates[city]) gameData.marketRates[city] = {};
-                        gameData.marketRates[city][itemName] = { rate: parseFloat(getRowValue(row, 'Rate')) || 1.0, demand: getRowValue(row, 'Demand') };
+                const dataParts = [];
+                // B列以降のデータを処理
+                for (let i = 1; i < headers.length; i++) {
+                    const header = headers[i];
+                    const value = row.get(header);
+                    // 値が空でない場合のみパーツを追加
+                    if (value !== null && value !== undefined && value !== '') {
+                        dataParts.push({ header, value });
                     }
                 }
+
+                if (dataParts.length === 0) continue;
+
+                let line = "";
+                // --- 新しい整形ルールに基づき文字列を生成 ---
+                if (dataParts.length === 1) {
+                    // データが1つだけの場合は、連結詞を使わず値のみを書き出す
+                    line = `${dataParts[0].value}`;
+                } else {
+                    const lastIndex = dataParts.length - 1;
+                    const formattedParts = dataParts.map((part, index) => {
+                        if (index === lastIndex) {
+                            // 最後の列は「は、」で連結
+                            return `${part.header}「${part.value}」`;
+                        } else {
+                            // それ以外の列は「の」で連結
+                            return `${part.header}「${part.value}」`;
+                        }
+                    });
+                    
+                    const head = formattedParts.slice(0, lastIndex).join('の');
+                    const tail = formattedParts[lastIndex];
+                    line = `${head}は、${tail}`;
+                }
+                knowledgeLines.push(line);
+            }
+
+            if (knowledgeLines.length > 0) {
+                const knowledgeText = knowledgeLines.join('\n');
+                const userMessage = userMessageTemplate + '\n' + knowledgeText;
+                
+                // --- 会話履歴セットを生成 ---
+                initialHistoryWithDirectives.push(
+                    { role: 'user', parts: [{ text: `User "${userName}": "${userMessage}"` }] },
+                    { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、${userName}！全て承知いたしました！"` }] }
+                );
+                console.log(`[Loader] Successfully loaded ${knowledgeLines.length} records from "${sheet.title}".`);
             }
         }
-        console.log("[Loader] Finished loading all game data.");
-        return gameData;
+
+        console.log(`[Loader] Finished loading all data. Generated ${initialHistoryWithDirectives.length / 2} sets of memories.`);
+        return initialHistoryWithDirectives;
+
     } catch (error) {
         console.error("Error loading game data from Google Sheets:", error);
         return null;
     }
 }
 
+// --- チャンネルごとの会話履歴を保持する変数 ---
 const channelHistories = new Map();
+
+// --- ヘルパー関数群 ---
 const parseDiceCommand = (input) => {
-    const match = input.match(/^(\d+)d(\d+)$/);
+    const match = input.match(/^!(\d+)d(\d+)$/i); // 先頭の!を許容し、大文字小文字を区別しない
     if (!match) return null;
     const count = parseInt(match[1], 10), sides = parseInt(match[2], 10);
     return { count, sides };
@@ -101,105 +148,59 @@ const rollDice = (count, sides) => {
     for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
     return rolls;
 };
-const initialHistory = [
-    { role: 'user', parts: [{ text: `User "Newcomer": "こんにちは、あなたがここの担当のノエルさん？"` }] },
-    { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！"` }] }
-];
-const getParticipants = (historyContents) => {
-    const participants = new Set([BOT_PERSONA_NAME]);
-    for (const content of historyContents) {
-        if (content.role === 'user') {
-            const match = content.parts[0].text.match(/User "([^"]+)"/);
-            if (match) participants.add(match[1]);
-        }
-    }
-    return participants;
-};
-const generateContentWithRetry = async (request, maxRetries = 5) => {
-    let lastError = null;
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            return await ai.models.generateContent(request);
-        } catch (error) {
-            lastError = error;
-            if (error.toString().includes('429')) {
-                const delay = (2 ** i) * 1000 + Math.random() * 1000;
-                console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            } else { throw error; }
-        }
-    }
-    console.error("All retries failed.");
-    throw lastError;
-};
-const formatGameDataForAI = (gameData) => {
-    let knowledge = "### WORLD KNOWLEDGE (DATA LEDGER)\n";
-    knowledge += "You have access to the following data ledgers. You must treat this data as absolute fact.\n\n";
-    knowledge += "**--- Master Item Data ---**\n";
-    knowledge += "| Item Name | Base Value (G) |\n";
-    knowledge += "|-----------|----------------|\n";
-    if (gameData.masterData.size > 0) {
-        for (const [name, data] of gameData.masterData.entries()) {
-            knowledge += `| ${name} | ${data.baseValue} |\n`;
-        }
-    } else {
-        knowledge += "| (No Data) | (No Data) |\n";
-    }
-    knowledge += "\n";
-    knowledge += "**--- City Market Rates ---**\n";
-    knowledge += "| City | Item Name | Rate | Demand |\n";
-    knowledge += "|------|-----------|------|--------|\n";
-    if (Object.keys(gameData.marketRates).length > 0) {
-        for (const city in gameData.marketRates) {
-            for (const item in gameData.marketRates[city]) {
-                const data = gameData.marketRates[city][item];
-                knowledge += `| ${city} | ${item} | ${data.rate} | ${data.demand} |\n`;
-            }
-        }
-    } else {
-        knowledge += "| (No Data) | (No Data) | (No Data) | (No Data) |\n";
-    }
-    return knowledge;
-};
 
-client.once('clientReady', () => {
+// --- Discordイベントリスナー ---
+client.once('ready', client => { // 'clientReady' は v14 で 'ready' に変更されました
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
 });
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
-    const command = message.content.trim();
 
+    // --- コマンド処理を最初に移動 ---
+    const command = message.content.trim();
     if (command.startsWith('!')) {
-        if (command === '!ver') { message.reply(`現在の私のバージョンは ${BOT_VERSION} です`); }
-        else if (command === '!ping') { message.reply('Pong!'); }
-        else {
-            const parsed = parseDiceCommand(command);
-            if (parsed) {
-                const { count, sides } = parsed;
-                if (count > 100 || sides > 1000) { message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）'); }
-                else {
-                    const results = rollDice(count, sides);
-                    const total = results.reduce((a, b) => a + b, 0);
-                    message.reply(`🎲 ${count}d${sides} の結果: [${results.join(', ')}] → 合計: ${total}`);
-                }
-            }
+        if (command === '!ver') {
+            message.reply(`現在の私のバージョンは ${BOT_VERSION} です`);
+            return;
         }
-        return;
+        if (command === '!ping') {
+            message.reply('Pong!');
+            return;
+        }
+        
+        const parsedDice = parseDiceCommand(command);
+        if (parsedDice) {
+            const { count, sides } = parsedDice;
+            if (count > 100 || sides > 1000) {
+                message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）');
+            } else {
+                const results = rollDice(count, sides);
+                const total = results.reduce((a, b) => a + b, 0);
+                message.reply(`🎲 ${count}d${sides} の結果: [${results.join(', ')}] → 合計: ${total}`);
+            }
+            return; // コマンド処理後はAI応答をしない
+        }
     }
 
+    // --- AI応答処理 ---
     try {
-        const gameData = await loadGameDataFromSheets();
-        if (!gameData) {
-            message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
+        const initialHistoryFromSheets = await loadAndFormatAllDataForAI();
+        if (!initialHistoryFromSheets || initialHistoryFromSheets.length === 0) {
+            message.reply('ごめんなさい、ギルドの台帳が今見つからないか、中身が空っぽみたい……');
             return;
         }
 
         const channelId = message.channel.id;
         const now = Date.now();
         let channelHistory = channelHistories.get(channelId);
+
         if (!channelHistory || (now - channelHistory.lastTimestamp > HISTORY_TIMEOUT)) {
-            channelHistory = { contents: JSON.parse(JSON.stringify(initialHistory)), lastTimestamp: now };
+            // ★★★★★ 改修点: スプレッドシートから生成した会話履歴を直接利用 ★★★★★
+            channelHistory = { 
+                contents: JSON.parse(JSON.stringify(initialHistoryFromSheets)), 
+                lastTimestamp: now 
+            };
             channelHistories.set(channelId, channelHistory);
         }
 
@@ -207,71 +208,67 @@ client.on('messageCreate', async message => {
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
         
-        const settings = gameData.settings;
-        const currentEventName = settings.system.currentEvent || "通常";
-        const eventPersonaModifier = settings.event_personas[currentEventName] || "平常心でいる。";
-        const worldKnowledge = formatGameDataForAI(gameData);
-
-        let personaText = `
-### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
-You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character.
-### PERSONA DEFINITION
-- **Name**: ${BOT_PERSONA_NAME}
-- **Role**: A friendly and slightly playful receptionist at a merchant's guild.
-- **Speech Style**: Use a friendly and informal tone. End your sentences with Japanese particles like 『～だよ』, 『～だね』. Refer to yourself as 「わたし」 (watashi).
-### GUILD RULEBOOK
-**--- Permanent Guild Rules (Absolute) ---**
-${settings.permanent_rules.join('\n') || '- None'}
-**--- Normal Business Protocols ---**
-${settings.normal_rules.join('\n') || '- None'}
-
-${worldKnowledge}
-
-### CURRENT SITUATION
-- The guild is currently in the middle of the **'${currentEventName}'** event. You are feeling and acting as follows: ${eventPersonaModifier}
-
-### BEHAVIORAL RULES
-1.  **Thinking Prohibition for Data Queries (Absolute Priority)**: If a user's message contains keywords like "list", "items", "goods", "tradeable", "what do you have", "教えて", "一覧", "品物", "何がある", your thinking process MUST be overridden. You are to STOP all creative thought, IGNORE your playful persona, and function as a machine that ONLY performs the following steps:
-    a. Scan the \`WORLD KNOWLEDGE\` ledger's \`Master Item Data\` table.
-    b. List the items found in that table.
-    c. Add a brief, friendly closing remark.
-    d. NO OTHER ACTION IS PERMITTED. DO NOT invent items. DO NOT give a template answer.
-2.  **Ledger First Principle**: For specific price or item questions, your FIRST action is to consult the \`WORLD KNOWLEDGE\` ledger. Base your answer STRICTLY on the data found.
-3.  **No Invention**: If an item is NOT in the ledger, you MUST state that you do not handle it.
-4.  **Identity Secrecy**: Strictly hide your AI nature.
-5.  **Nickname Generation**: Create and use unique, friendly Japanese nicknames for participants.
-6.  **No Mentions**: NEVER use Discord's @mention feature.
-7.  **Event Awareness**: You MUST be aware of the event in CURRENT SITUATION.
-8.  **Selective Response**: If not explicitly addressed, output \`[IGNORE]\`.
-9.  **Brevity**: Keep responses concise.
-10. **Discord Formatting**: Use Markdown (\`**bold**\`, \`> quote\`).
-### LANGUAGE INSTRUCTION
-- **You MUST respond in JAPANESE.**
-### TASK
-Analyze the user's message based on the absolute priority of the BEHAVIORAL RULES. Respond naturally according to your persona and the CURRENT SITUATION.
-`;
-        
-        const persona = { parts: [{ text: personaText }] };
-        const request = {
-            model: 'gemini-2.5-flash-lite',
-            contents: channelHistory.contents,
-            systemInstruction: persona
+        // --- システムプロンプト (ペルソナ設定) ---
+        const systemInstruction = {
+            parts: [{ text: `### CORE DIRECTIVE: ROLE-PLAYING
+You are a character named ${BOT_PERSONA_NAME}. NEVER break character. NEVER mention that you are an AI.
+Your personality and all you know about the world are defined by the conversation history.
+Your task is to continue the conversation naturally as your character.
+You MUST respond in JAPANESE.`
+            }]
         };
-        const response = await generateContentWithRetry(request);
-        
-        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '[IGNORE]';
 
-        if (reply.trim() === '[IGNORE]') {
-            console.log(`[${message.channel.name}] Noel decided to ignore (AI decision).`);
-            return;
+        const model = ai.getGenerativeModel({
+            model: 'gemini-2.5-flash-lite',
+            systemInstruction: systemInstruction,
+        });
+
+        const chat = model.startChat({
+            history: channelHistory.contents.slice(0, -1), // 最後（現在のユーザー発言）を除いた履歴
+        });
+        
+        // --- 指数バックオフ付きのリトライ処理 ---
+        const generateContentWithRetry = async (prompt, maxRetries = 5) => {
+            let lastError = null;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const result = await chat.sendMessage(prompt);
+                    return result.response;
+                } catch (error) {
+                    lastError = error;
+                    // APIからのエラーレスポンスに 429 が含まれているかチェック
+                    if (error.toString().includes('429') || (error.status && error.status === 429)) {
+                        const delay = (2 ** i) * 1000 + Math.random() * 1000;
+                        console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else {
+                        // 429以外のエラーは再スロー
+                        throw error;
+                    }
+                }
+            }
+            console.error("All retries failed.");
+            throw lastError;
+        };
+        
+        const response = await generateContentWithRetry(command);
+        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '...';
+        
+        // --- 応答からペルソナ名などを取り除く処理を簡素化 ---
+        // Geminiは `BOT_PERSONA_NAME}: "..."` のような形式で応答することが少ないため、
+        // 念の為の処理とし、よりシンプルにします。
+        let finalReply = reply.trim();
+        if (finalReply.startsWith(`${BOT_PERSONA_NAME}:`)) {
+            finalReply = finalReply.substring(BOT_PERSONA_NAME.length + 1).trim();
+        }
+        if (finalReply.startsWith('"') && finalReply.endsWith('"')) {
+            finalReply = finalReply.substring(1, finalReply.length - 1);
         }
         
-        let finalReply = reply;
-        const replyMatch = reply.match(new RegExp(`^${BOT_PERSONA_NAME}:\\s*"(.*)"$`));
-        if (replyMatch) finalReply = replyMatch[1];
-        
         message.reply(finalReply);
-        channelHistory.contents.push({ role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${finalReply}"` }] });
+
+        // --- 実際のボットの応答を履歴に追加 ---
+        channelHistory.contents.push({ role: 'model', parts: [{ text: finalReply }] });
         channelHistory.lastTimestamp = now;
 
     } catch (error) {
@@ -280,8 +277,10 @@ Analyze the user's message based on the absolute priority of the BEHAVIORAL RULE
     }
 });
 
+// --- Discordボットのログイン ---
 client.login(process.env.DISCORD_TOKEN);
 
+// --- Renderスリープ対策用Webサーバー ---
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
