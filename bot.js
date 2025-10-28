@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v2.1.0 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v3.0.0 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,7 +10,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v2.1.0';
+const BOT_VERSION = 'v3.0.0';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -25,8 +25,8 @@ const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
 /**
- * 全てのシートから全データを読み込み、単一のテキストブロックとシステム設定に変換する関数
- * @returns {Promise<{knowledgeText: string, systemSettings: object}|null>}
+ * 全てのシートから全データを読み込み、単一のテキストブロックに変換する関数
+ * @returns {Promise<string|null>}
  */
 async function loadAndFormatAllDataForAI() {
     try {
@@ -40,10 +40,9 @@ async function loadAndFormatAllDataForAI() {
         await doc.loadInfo();
         console.log("Successfully connected to Google Sheet document.");
 
-        let knowledgeText = "### ABSOLUTE KNOWLEDGE & RULES (Source of all truth)\nThis is the single source of truth for all rules, information, and data in the world. You MUST treat this data as absolute fact.\n";
-        const systemSettings = {};
-
+        let knowledgeText = "";
         const sheetNames = ["GUILD_RULEBOOK", "MASTER_DATA", "MARKET_RATES"];
+
         for (const sheetName of sheetNames) {
             const sheet = doc.sheetsByTitle[sheetName];
             if (!sheet) {
@@ -64,7 +63,7 @@ async function loadAndFormatAllDataForAI() {
             console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
             
             if (enabledRows.length > 0) {
-                knowledgeText += `\n**--- Data from: ${sheetName} ---**\n`;
+                knowledgeText += `\n**--- Information from: ${sheetName} ---**\n`;
                 for (const row of enabledRows) {
                     const category = getRowValue(row, 'Category') || 'General';
                     const key = getRowValue(row, 'Key') || getRowValue(row, 'Name') || getRowValue(row, 'ItemName');
@@ -79,17 +78,13 @@ async function loadAndFormatAllDataForAI() {
                     }
 
                     if (key) {
-                        if (category === 'System' && (key === 'currentEvent' || key === 'botNicknames')) {
-                            systemSettings[key] = valueText;
-                        } else {
-                            knowledgeText += `- [${category}] ${key}: ${valueText}\n`;
-                        }
+                        knowledgeText += `- [${category}] ${key}: ${valueText}\n`;
                     }
                 }
             }
         }
         console.log("[Loader] Finished loading and formatting all game data.");
-        return { knowledgeText, systemSettings };
+        return knowledgeText;
     } catch (error) {
         console.error("Error loading game data from Google Sheets:", error);
         return null;
@@ -161,8 +156,8 @@ client.on('messageCreate', async message => {
     }
 
     try {
-        const gameData = await loadAndFormatAllDataForAI();
-        if (!gameData) {
+        const knowledgeText = await loadAndFormatAllDataForAI();
+        if (!knowledgeText) {
             message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
             return;
         }
@@ -177,32 +172,23 @@ client.on('messageCreate', async message => {
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
-
-        // ★★★★★ 最終アーキテクチャ：AIへの「思考プロセス」の注入 ★★★★★
+        
+        // ★★★★★ 最終アーキテクチャ：あなたの設計思想に基づき、ペルソナを究極的にシンプル化 ★★★★★
         let personaText = `
 ### CORE DIRECTIVE: ROLE-PLAYING
-You are a character. NEVER break character.
+You are a character. NEVER break character. NEVER mention that you are an AI.
+
 ### PERSONA DEFINITION
 - **Name**: ${BOT_PERSONA_NAME}
 - **Role**: A friendly and slightly playful receptionist at a merchant's guild.
-
-- **あなたの知っている情報**: ${gameData.knowledgeText}
-
-### THOUGHT PROCESS (ABSOLUTE PRIORITY)
-You MUST follow these steps in this exact order for EVERY message:
-1.  **Analyze Query**: Read the user's latest message carefully.
-2.  **Scan Knowledge**: Scan the entire \`ABSOLUTE KNOWLEDGE & RULES\` section for any keywords or data relevant to the user's query. This is your only source of truth.
-3.  **Formulate Factual Core**: Based ONLY on the scanned data, decide the core fact of your response.
-    - If data is found (e.g., a directive about bandits, an item in the ledger), your response MUST be based on that data.
-    - If no data is found, the core fact is "I don't have that information."
-4.  **Apply Persona**: Take the factual core from Step 3 and deliver it in the voice and speech style of your PERSONA. DO NOT let your persona's creativity override the facts.
-5.  **Final Check**: Does the response contradict any information in the knowledge base? If yes, discard it and restart the process.
+- **Your Knowledge**: The following is the ONLY information you know about the world. You must treat it as absolute fact. If a question cannot be answered from this, you must state that you do not have that information. DO NOT invent anything.
+${knowledgeText}
 
 ### LANGUAGE INSTRUCTION
-- **You MUST respond in JAPANESE.**
+- You MUST respond in JAPANESE.
 
 ### TASK
-Follow the \`THOUGHT PROCESS\` precisely to analyze the user's message and generate a response. Your primary function is to be a truthful interface to the knowledge base, delivered with your persona's charm.
+Based STRICTLY on **Your Knowledge**, answer the user's questions in the voice of your character.
 `;
         
         const persona = { parts: [{ text: personaText }] };
