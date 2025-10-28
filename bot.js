@@ -1,5 +1,5 @@
 // =agreed================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.2.2 (最終修正版)
+// TRPGサポートDiscordボット "ノエル" v3.2.3 (バグ修正版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,13 +10,13 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.2.2';
+const BOT_VERSION = 'v3.2.3';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 const GUILD_MASTER_NAME = 'ギルドマスター';
 
 // --- クライアント初期化 ---
-const ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
@@ -43,7 +43,9 @@ async function loadAndFormatAllDataForAI() {
             console.log(`[Loader] Processing sheet: "${sheet.title}"`);
             
             await sheet.loadCells('A1:C1');
-            if (sheet.getCell(0, 0).value !== true) {
+            const sheetEnabledValue = sheet.getCell(0, 0).value;
+            // ★★★★★【修正点１】シート有効化の判定を修正 ★★★★★
+            if (sheetEnabledValue !== true && sheetEnabledValue !== 'TRUE') {
                 console.log(`[Loader] Sheet "${sheet.title}" is disabled. Skipping.`);
                 continue;
             }
@@ -61,7 +63,11 @@ async function loadAndFormatAllDataForAI() {
             const headers = sheet.headerValues;
 
             for (const row of rows) {
-                if (row.get(headers[0]) !== true) continue;
+                const rowEnabledValue = row.get(headers[0]);
+                // ★★★★★【修正点２】行有効化の判定を修正 ★★★★★
+                if (rowEnabledValue !== true && rowEnabledValue !== 'TRUE') {
+                    continue;
+                }
 
                 const dataParts = [];
                 for (let i = 1; i < headers.length; i++) {
@@ -75,15 +81,11 @@ async function loadAndFormatAllDataForAI() {
                 if (dataParts.length === 0) continue;
 
                 let line = "";
-                // ★★★★★【ロジック修正】データ整形処理の不具合を修正 ★★★★★
                 if (dataParts.length === 1) {
-                    // データが1つの場合は値のみを書き出す
                     line = `${dataParts[0].value}`;
                 } else {
-                    // 複数の場合は連結する
                     const lastIndex = dataParts.length - 1;
                     const formattedParts = dataParts.map(part => `${part.header}「${part.value}」`);
-                    
                     const head = formattedParts.slice(0, lastIndex).join('の');
                     const tail = formattedParts[lastIndex];
                     line = `${head}は、${tail}`;
