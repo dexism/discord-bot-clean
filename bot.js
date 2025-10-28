@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v2.0.1 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v2.0.3 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,7 +10,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v2.0.1';
+const BOT_VERSION = 'v2.0.3';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -178,11 +178,7 @@ client.on('messageCreate', async message => {
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
 
-console.log("--- DEBUG: START of knowledgeText DATASET ---");
-        // knowledgeTextの最初の500文字をログに出力します
-        console.log(gameData.knowledgeText.substring(0, 500));
-        console.log("--- DEBUG: END of knowledgeText DATASET ---");
-
+        // ★★★★★ THE CRITICAL FIX: Inject the entire knowledge base into the persona. ★★★★★
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
 You are NOT a large language model, AI, or bot. You are a character.
