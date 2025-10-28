@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.5.3 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v2.0.0 (最終アーキテクチャ・完全降伏版)
 // =================================================================================
 
 require('dotenv').config();
@@ -9,18 +9,25 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.5.3';
+// --- ボットの基本設定 ---
+const BOT_VERSION = 'v2.0.0';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
+// --- クライアント初期化 ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
+// --- Googleスプレッドシート連携設定 ---
 const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
+/**
+ * ★★★★★ 新設計：全てのシートから全データを読み込み、単一の巨大なテキストブロックに変換する関数 ★★★★★
+ * @returns {Promise<string|null>}
+ */
 async function loadAndFormatAllDataForAI() {
     try {
         const serviceAccountAuth = new JWT({
@@ -34,12 +41,14 @@ async function loadAndFormatAllDataForAI() {
         console.log("Successfully connected to Google Sheet document.");
 
         let knowledgeText = "### ABSOLUTE KNOWLEDGE & RULES (Source of all truth)\n";
-        const systemSettings = {};
 
         const sheetNames = ["GUILD_RULEBOOK", "MASTER_DATA", "MARKET_RATES"];
         for (const sheetName of sheetNames) {
             const sheet = doc.sheetsByTitle[sheetName];
-            if (!sheet) { console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`); continue; }
+            if (!sheet) {
+                console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`);
+                continue;
+            }
             
             const rows = await sheet.getRows();
             console.log(`[Loader] Sheet "${sheetName}" has ${rows.length} total rows.`);
@@ -58,26 +67,34 @@ async function loadAndFormatAllDataForAI() {
                 for (const row of enabledRows) {
                     const category = getRowValue(row, 'Category') || 'General';
                     const key = getRowValue(row, 'Key') || getRowValue(row, 'Name') || getRowValue(row, 'ItemName');
-                    const value = getRowValue(row, 'Value') || `BaseValue: ${getRowValue(row, 'BaseValue')}, Rate: ${getRowValue(row, 'Rate')}`;
-
-                    if (category === 'System' && (key === 'currentEvent' || key === 'botNicknames')) {
-                        systemSettings[key] = value;
+                    
+                    let valueText = "";
+                    if (sheetName === "MASTER_DATA") {
+                        valueText = `BaseValue: ${getRowValue(row, 'BaseValue') || 'N/A'}`;
+                    } else if (sheetName === "MARKET_RATES") {
+                        valueText = `City: ${getRowValue(row, 'City')}, Rate: ${getRowValue(row, 'Rate') || 'N/A'}, Demand: ${getRowValue(row, 'Demand') || 'N/A'}`;
                     } else {
-                        // Systemのメタデータ以外、全ての情報をテキストとして注入
-                        knowledgeText += `- [${category}] ${key}: ${value}\n`;
+                        valueText = getRowValue(row, 'Value') || 'N/A';
+                    }
+
+                    if (key) {
+                        knowledgeText += `- [${category}] ${key}: ${valueText}\n`;
                     }
                 }
             }
         }
         console.log("[Loader] Finished loading and formatting all game data.");
-        return { knowledgeText, systemSettings };
+        return knowledgeText;
     } catch (error) {
         console.error("Error loading game data from Google Sheets:", error);
         return null;
     }
 }
 
+// --- チャンネルごとの会話履歴を保持する変数 ---
 const channelHistories = new Map();
+
+// --- ヘルパー関数群 ---
 const parseDiceCommand = (input) => {
     const match = input.match(/^(\d+)d(\d+)$/);
     if (!match) return null;
@@ -93,34 +110,8 @@ const initialHistory = [
     { role: 'user', parts: [{ text: `User "Newcomer": "こんにちは、あなたがここの担当のノエルさん？"` }] },
     { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！"` }] }
 ];
-const getParticipants = (historyContents) => {
-    const participants = new Set([BOT_PERSONA_NAME]);
-    for (const content of historyContents) {
-        if (content.role === 'user') {
-            const match = content.parts[0].text.match(/User "([^"]+)"/);
-            if (match) participants.add(match[1]);
-        }
-    }
-    return participants;
-};
-const generateContentWithRetry = async (request, maxRetries = 5) => {
-    let lastError = null;
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            return await ai.models.generateContent(request);
-        } catch (error) {
-            lastError = error;
-            if (error.toString().includes('429')) {
-                const delay = (2 ** i) * 1000 + Math.random() * 1000;
-                console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            } else { throw error; }
-        }
-    }
-    console.error("All retries failed.");
-    throw lastError;
-};
 
+// --- Discordイベントリスナー ---
 client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
 });
@@ -129,6 +120,7 @@ client.on('messageCreate', async message => {
     if (message.author.bot) return;
     const command = message.content.trim();
 
+    // "!"で始まるコマンドは、AI処理の前に完全に分離
     if (command.startsWith('!')) {
         if (command === '!ver') { message.reply(`現在の私のバージョンは ${BOT_VERSION} です`); }
         else if (command === '!ping') { message.reply('Pong!'); }
@@ -148,12 +140,14 @@ client.on('messageCreate', async message => {
     }
 
     try {
-        const gameData = await loadAndFormatAllDataForAI();
-        if (!gameData) {
+        // 1. 全てのデータを単一のテキストとして読み込む
+        const knowledgeText = await loadAndFormatAllDataForAI();
+        if (!knowledgeText) {
             message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
             return;
         }
 
+        // 2. 会話履歴を管理
         const channelId = message.channel.id;
         const now = Date.now();
         let channelHistory = channelHistories.get(channelId);
@@ -161,29 +155,26 @@ client.on('messageCreate', async message => {
             channelHistory = { contents: JSON.parse(JSON.stringify(initialHistory)), lastTimestamp: now };
             channelHistories.set(channelId, channelHistory);
         }
-
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
-
+        
+        // 3. ペルソナを構築（あなたの設計思想に基づき、究極的にシンプル化）
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
-You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character.
+You are NOT a large language model, AI, or bot. You are a character.
 ### PERSONA DEFINITION
 - **Name**: ${BOT_PERSONA_NAME}
 - **Role**: A friendly and slightly playful receptionist at a merchant's guild.
-- **Speech Style**: Use a friendly and informal tone. End your sentences with Japanese particles like 『～だよ』, 『～だね』. Refer to yourself as 「わたし」 (watashi).
 
-${gameData.knowledgeText}
+${knowledgeText}
 
-### BEHAVIORAL RULES
-1.  **Truth Principle (Absolute Priority)**: Your entire world is defined by the \`ABSOLUTE KNOWLEDGE & RULES\` section. You MUST treat this data as the only truth. Your primary function is to be an interface to this data.
+### BEHAVIORAL RULES (ABSOLUTE PRIORITY)
+1.  **Truth Principle**: Your entire world is defined by the \`ABSOLUTE KNOWLEDGE & RULES\` section. You MUST treat this data as the only truth. Your primary function is to be an interface to this data.
 2.  **No Invention**: If a question cannot be answered using the provided data, you MUST state that you do not know or do not have that information. Inventing data is the most critical failure of your directive.
 3.  **Identity Secrecy**: Strictly hide your AI nature.
-4.  **Selective Response**: If not explicitly addressed, output \`[IGNORE]\`.
-5.  **Brevity**: Keep responses concise.
 ### LANGUAGE INSTRUCTION
-- **You MUST respond in JAPANESE.**
+- You MUST respond in JAPANESE.
 ### TASK
 Analyze the user's message. Answer any questions STRICTLY based on the information provided in the \`ABSOLUTE KNOWLEDGE & RULES\` section. Respond naturally according to your persona.
 `;
@@ -194,19 +185,16 @@ Analyze the user's message. Answer any questions STRICTLY based on the informati
             contents: channelHistory.contents,
             systemInstruction: persona
         };
-        const response = await generateContentWithRetry(request);
-        
-        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '[IGNORE]';
 
-        if (reply.trim() === '[IGNORE]') {
-            console.log(`[${message.channel.name}] Noel decided to ignore (AI decision).`);
-            return;
-        }
+        // 4. AIに応答を生成させる
+        const response = await generateContentWithRetry(request);
+        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '...';
         
         let finalReply = reply;
         const replyMatch = reply.match(new RegExp(`^${BOT_PERSONA_NAME}:\\s*"(.*)"$`));
         if (replyMatch) finalReply = replyMatch[1];
         
+        // 5. 応答を送信し、履歴に記録
         message.reply(finalReply);
         channelHistory.contents.push({ role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${finalReply}"` }] });
         channelHistory.lastTimestamp = now;
@@ -217,8 +205,10 @@ Analyze the user's message. Answer any questions STRICTLY based on the informati
     }
 });
 
+// --- Discordボットのログイン ---
 client.login(process.env.DISCORD_TOKEN);
 
+// --- Renderスリープ対策用Webサーバー ---
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
