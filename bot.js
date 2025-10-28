@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v2.0.0 (最終アーキテクチャ・完全降伏版)
+// TRPGサポートDiscordボット "ノエル" v2.0.1 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,7 +10,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v2.0.0';
+const BOT_VERSION = 'v2.0.1';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -25,8 +25,8 @@ const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
 /**
- * ★★★★★ 新設計：全てのシートから全データを読み込み、単一の巨大なテキストブロックに変換する関数 ★★★★★
- * @returns {Promise<string|null>}
+ * 全てのシートから全データを読み込み、単一のテキストブロックとシステム設定に変換する関数
+ * @returns {Promise<{knowledgeText: string, systemSettings: object}|null>}
  */
 async function loadAndFormatAllDataForAI() {
     try {
@@ -40,7 +40,8 @@ async function loadAndFormatAllDataForAI() {
         await doc.loadInfo();
         console.log("Successfully connected to Google Sheet document.");
 
-        let knowledgeText = "### ABSOLUTE KNOWLEDGE & RULES (Source of all truth)\n";
+        let knowledgeText = "### ABSOLUTE KNOWLEDGE & RULES (Source of all truth)\nThis is the single source of truth for all rules, information, and data in the world. You MUST treat this data as absolute fact.\n";
+        const systemSettings = {};
 
         const sheetNames = ["GUILD_RULEBOOK", "MASTER_DATA", "MARKET_RATES"];
         for (const sheetName of sheetNames) {
@@ -72,19 +73,23 @@ async function loadAndFormatAllDataForAI() {
                     if (sheetName === "MASTER_DATA") {
                         valueText = `BaseValue: ${getRowValue(row, 'BaseValue') || 'N/A'}`;
                     } else if (sheetName === "MARKET_RATES") {
-                        valueText = `City: ${getRowValue(row, 'City')}, Rate: ${getRowValue(row, 'Rate') || 'N/A'}, Demand: ${getRowValue(row, 'Demand') || 'N/A'}`;
+                        valueText = `City: ${getRowValue(row, 'City')}, Item: ${getRowValue(row, 'ItemName')}, Rate: ${getRowValue(row, 'Rate') || 'N/A'}, Demand: ${getRowValue(row, 'Demand') || 'N/A'}`;
                     } else {
                         valueText = getRowValue(row, 'Value') || 'N/A';
                     }
 
                     if (key) {
-                        knowledgeText += `- [${category}] ${key}: ${valueText}\n`;
+                        if (category === 'System' && (key === 'currentEvent' || key === 'botNicknames')) {
+                            systemSettings[key] = valueText;
+                        } else {
+                            knowledgeText += `- [${category}] ${key}: ${valueText}\n`;
+                        }
                     }
                 }
             }
         }
         console.log("[Loader] Finished loading and formatting all game data.");
-        return knowledgeText;
+        return { knowledgeText, systemSettings };
     } catch (error) {
         console.error("Error loading game data from Google Sheets:", error);
         return null;
@@ -110,6 +115,23 @@ const initialHistory = [
     { role: 'user', parts: [{ text: `User "Newcomer": "こんにちは、あなたがここの担当のノエルさん？"` }] },
     { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、わたしが受付担当の${BOT_PERSONA_NAME}だよ！どうぞよろしくね！"` }] }
 ];
+const generateContentWithRetry = async (request, maxRetries = 5) => {
+    let lastError = null;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            return await ai.models.generateContent(request);
+        } catch (error) {
+            lastError = error;
+            if (error.toString().includes('429')) {
+                const delay = (2 ** i) * 1000 + Math.random() * 1000;
+                console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else { throw error; }
+        }
+    }
+    console.error("All retries failed.");
+    throw lastError;
+};
 
 // --- Discordイベントリスナー ---
 client.once('clientReady', () => {
@@ -120,7 +142,6 @@ client.on('messageCreate', async message => {
     if (message.author.bot) return;
     const command = message.content.trim();
 
-    // "!"で始まるコマンドは、AI処理の前に完全に分離
     if (command.startsWith('!')) {
         if (command === '!ver') { message.reply(`現在の私のバージョンは ${BOT_VERSION} です`); }
         else if (command === '!ping') { message.reply('Pong!'); }
@@ -140,14 +161,12 @@ client.on('messageCreate', async message => {
     }
 
     try {
-        // 1. 全てのデータを単一のテキストとして読み込む
-        const knowledgeText = await loadAndFormatAllDataForAI();
-        if (!knowledgeText) {
+        const gameData = await loadAndFormatAllDataForAI();
+        if (!gameData) {
             message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
             return;
         }
 
-        // 2. 会話履歴を管理
         const channelId = message.channel.id;
         const now = Date.now();
         let channelHistory = channelHistories.get(channelId);
@@ -158,8 +177,7 @@ client.on('messageCreate', async message => {
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
-        
-        // 3. ペルソナを構築（あなたの設計思想に基づき、究極的にシンプル化）
+
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
 You are NOT a large language model, AI, or bot. You are a character.
@@ -167,14 +185,14 @@ You are NOT a large language model, AI, or bot. You are a character.
 - **Name**: ${BOT_PERSONA_NAME}
 - **Role**: A friendly and slightly playful receptionist at a merchant's guild.
 
-${knowledgeText}
+${gameData.knowledgeText}
 
 ### BEHAVIORAL RULES (ABSOLUTE PRIORITY)
 1.  **Truth Principle**: Your entire world is defined by the \`ABSOLUTE KNOWLEDGE & RULES\` section. You MUST treat this data as the only truth. Your primary function is to be an interface to this data.
 2.  **No Invention**: If a question cannot be answered using the provided data, you MUST state that you do not know or do not have that information. Inventing data is the most critical failure of your directive.
 3.  **Identity Secrecy**: Strictly hide your AI nature.
 ### LANGUAGE INSTRUCTION
-- You MUST respond in JAPANESE.
+- **You MUST respond in JAPANESE.**
 ### TASK
 Analyze the user's message. Answer any questions STRICTLY based on the information provided in the \`ABSOLUTE KNOWLEDGE & RULES\` section. Respond naturally according to your persona.
 `;
@@ -186,7 +204,6 @@ Analyze the user's message. Answer any questions STRICTLY based on the informati
             systemInstruction: persona
         };
 
-        // 4. AIに応答を生成させる
         const response = await generateContentWithRetry(request);
         const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '...';
         
@@ -194,7 +211,6 @@ Analyze the user's message. Answer any questions STRICTLY based on the informati
         const replyMatch = reply.match(new RegExp(`^${BOT_PERSONA_NAME}:\\s*"(.*)"$`));
         if (replyMatch) finalReply = replyMatch[1];
         
-        // 5. 応答を送信し、履歴に記録
         message.reply(finalReply);
         channelHistory.contents.push({ role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${finalReply}"` }] });
         channelHistory.lastTimestamp = now;
