@@ -1,5 +1,5 @@
 // =================================================================================
-// TRPGサポートDiscordボット "ノエル" v1.5.1 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v1.5.2 (最終アーキテクチャ・完全版)
 // =================================================================================
 
 require('dotenv').config();
@@ -9,7 +9,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
-const BOT_VERSION = 'v1.5.1';
+const BOT_VERSION = 'v1.5.2';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 
@@ -21,6 +21,10 @@ const client = new Client({
 const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
+/**
+ * 全てのシートからゲームデータを読み込み、構造化されたオブジェクトとして返す関数
+ * @returns {Promise<object|null>} 成功時はゲームデータ、失敗時はnull
+ */
 async function loadGameDataFromSheets() {
     try {
         const serviceAccountAuth = new JWT({
@@ -34,7 +38,7 @@ async function loadGameDataFromSheets() {
         console.log("Successfully connected to Google Sheet document.");
 
         const gameData = {
-            settings: { system: {}, all_rules: [], event_personas: {} },
+            settings: { system: {}, all_rules_and_directives: [] },
             masterData: new Map(),
             marketRates: {}
         };
@@ -61,16 +65,17 @@ async function loadGameDataFromSheets() {
                     const category = getRowValue(row, 'Category'), key = getRowValue(row, 'Key'), value = getRowValue(row, 'Value');
                     if (!key || !value) continue;
 
-                    if (category === 'System') {
+                    // ★★★★★ 修正点：全てのルールを、区別なく単一のリストに格納する ★★★★★
+                    if (category === 'System' && (key === 'currentEvent' || key === 'botNicknames')) {
+                        // Systemの中でも、コードが直接使うメタデータだけをsettings.systemに格納
                         gameData.settings.system[key] = value;
-                        // ★★★★★ 修正点：Systemカテゴリのルールもall_rulesに追加する ★★★★★
-                        if (key !== 'currentEvent' && key !== 'botNicknames') {
-                            gameData.settings.all_rules.push(`[${category}] ${value}`);
-                        }
                     } else if (category === 'Event') {
+                         // Eventペルソナはall_rulesには含めず、moodとして別途扱う
+                        if (!gameData.settings.event_personas) gameData.settings.event_personas = {};
                         gameData.settings.event_personas[key] = value;
                     } else {
-                        gameData.settings.all_rules.push(`[${category}] ${value}`);
+                        // 上記以外の全ての有効なルール（Systemの緊急指令も含む）を、カテゴリ名を付けてリストに追加
+                        gameData.settings.all_rules_and_directives.push(`[${category}] ${key}: ${value}`);
                     }
                 } else if (sheetName === "MASTER_DATA") {
                     const name = getRowValue(row, 'Name');
@@ -212,10 +217,9 @@ client.on('messageCreate', async message => {
         
         const settings = gameData.settings;
         const currentEventName = settings.system.currentEvent || "通常";
-        const eventPersonaModifier = settings.event_personas[currentEventName] || "平常心でいる。";
+        const eventPersonaModifier = settings.event_personas?.[currentEventName] || "平常心でいる。";
         const worldKnowledge = formatGameDataForAI(gameData);
 
-        // ★★★★★ 修正点：ペルソナの構造を最終形に ★★★★★
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
 You are NOT a large language model, AI, or bot. You are a character. Your entire identity is defined by the persona below. NEVER break character.
@@ -225,7 +229,8 @@ You are NOT a large language model, AI, or bot. You are a character. Your entire
 - **Speech Style**: Use a friendly and informal tone. End your sentences with Japanese particles like 『～だよ』, 『～だね』. Refer to yourself as 「わたし」 (watashi).
 
 ### GUILD RULEBOOK & DIRECTIVES (ABSOLUTE)
-${settings.all_rules.length > 0 ? settings.all_rules.map(rule => `- ${rule}`).join('\n') : '- No current rules or directives.'}
+This is the single source of truth for all rules, information, and directives. You must read and adhere to all of them.
+${settings.all_rules_and_directives.length > 0 ? settings.all_rules_and_directives.map(rule => `- ${rule}`).join('\n') : '- No current rules or directives.'}
 
 ${worldKnowledge}
 
