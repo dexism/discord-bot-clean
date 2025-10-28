@@ -1,5 +1,5 @@
 // =agreed================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.1.0 (最終アーキテクチャ・完全版)
+// TRPGサポートDiscordボット "ノエル" v3.2.2 (最終修正版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,13 +10,13 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.1.0';
+const BOT_VERSION = 'v3.2.2';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
-const GUILD_MASTER_NAME = 'ギルドマスター'; // ギルマスの名前を定義
+const GUILD_MASTER_NAME = 'ギルドマスター';
 
 // --- クライアント初期化 ---
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
@@ -25,10 +25,6 @@ const client = new Client({
 const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
-/**
- * 全てのシートから全データを読み込み、単一のテキストブロックに変換する関数
- * @returns {Promise<string|null>}
- */
 async function loadAndFormatAllDataForAI() {
     try {
         const serviceAccountAuth = new JWT({
@@ -41,74 +37,95 @@ async function loadAndFormatAllDataForAI() {
         await doc.loadInfo();
         console.log("Successfully connected to Google Sheet document.");
 
-        let knowledgeText = "";
-        const sheetNames = ["GUILD_RULEBOOK", "MASTER_DATA", "MARKET_RATES"];
+        const initialHistoryWithDirectives = [];
 
-        for (const sheetName of sheetNames) {
-            const sheet = doc.sheetsByTitle[sheetName];
-            if (!sheet) {
-                console.warn(`[Loader] Sheet "${sheetName}" not found. Skipping.`);
+        for (const sheet of doc.sheetsByIndex) {
+            console.log(`[Loader] Processing sheet: "${sheet.title}"`);
+            
+            await sheet.loadCells('A1:C1');
+            if (sheet.getCell(0, 0).value !== true) {
+                console.log(`[Loader] Sheet "${sheet.title}" is disabled. Skipping.`);
                 continue;
             }
-            
+
+            const userName = sheet.getCell(0, 1).value || GUILD_MASTER_NAME;
+            const userMessageTemplate = sheet.getCell(0, 2).value;
+
+            if (!userMessageTemplate) {
+                console.warn(`[Loader] Sheet "${sheet.title}" is enabled but has no message template in C1. Skipping.`);
+                continue;
+            }
+
             const rows = await sheet.getRows();
-            console.log(`[Loader] Sheet "${sheetName}" has ${rows.length} total rows.`);
+            const knowledgeLines = [];
+            const headers = sheet.headerValues;
 
-            const getRowValue = (row, headerName) => {
-                const header = headerName.toLowerCase().trim();
-                const key = sheet.headerValues.find(h => h.toLowerCase().trim() === header);
-                return key ? row.get(key) : undefined;
-            };
+            for (const row of rows) {
+                if (row.get(headers[0]) !== true) continue;
 
-            const enabledRows = rows.filter(r => (getRowValue(r, 'Enabled') === 'TRUE' || getRowValue(r, 'Enabled') === true));
-            console.log(`[Loader] Found ${enabledRows.length} enabled rows in "${sheetName}".`);
-            
-            if (enabledRows.length > 0) {
-                knowledgeText += `\n**--- ${sheetName}からの情報 ---**\n`;
-                for (const row of enabledRows) {
-                    const category = getRowValue(row, 'Category') || '一般';
-                    const key = getRowValue(row, 'Key') || getRowValue(row, 'Name') || getRowValue(row, 'ItemName');
-                    
-                    let valueText = "";
-                    if (sheetName === "MASTER_DATA") {
-                        valueText = `基準価値: ${getRowValue(row, 'BaseValue') || '不明'}`;
-                    } else if (sheetName === "MARKET_RATES") {
-                        valueText = `都市: ${getRowValue(row, 'City')}, 品名: ${getRowValue(row, 'ItemName')}, レート: ${getRowValue(row, 'Rate') || '不明'}, 需要: ${getRowValue(row, 'Demand') || '不明'}`;
-                    } else {
-                        valueText = getRowValue(row, 'Value') || '不明';
-                    }
-
-                    if (key) {
-                        knowledgeText += `- カテゴリ「${category}」の「${key}」について: ${valueText}\n`;
+                const dataParts = [];
+                for (let i = 1; i < headers.length; i++) {
+                    const header = headers[i];
+                    const value = row.get(header);
+                    if (value !== null && value !== undefined && value !== '') {
+                        dataParts.push({ header, value });
                     }
                 }
+
+                if (dataParts.length === 0) continue;
+
+                let line = "";
+                // ★★★★★【ロジック修正】データ整形処理の不具合を修正 ★★★★★
+                if (dataParts.length === 1) {
+                    // データが1つの場合は値のみを書き出す
+                    line = `${dataParts[0].value}`;
+                } else {
+                    // 複数の場合は連結する
+                    const lastIndex = dataParts.length - 1;
+                    const formattedParts = dataParts.map(part => `${part.header}「${part.value}」`);
+                    
+                    const head = formattedParts.slice(0, lastIndex).join('の');
+                    const tail = formattedParts[lastIndex];
+                    line = `${head}は、${tail}`;
+                }
+                knowledgeLines.push(line);
+            }
+
+            if (knowledgeLines.length > 0) {
+                const knowledgeText = knowledgeLines.join('\n');
+                const userMessage = userMessageTemplate + '\n' + knowledgeText;
+                
+                initialHistoryWithDirectives.push(
+                    { role: 'user', parts: [{ text: `User "${userName}": "${userMessage}"` }] },
+                    { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、${userName}！全て承知いたしました！"` }] }
+                );
+                console.log(`[Loader] Successfully loaded ${knowledgeLines.length} records from "${sheet.title}".`);
             }
         }
-        console.log("[Loader] Finished loading and formatting all game data.");
-        return knowledgeText;
+
+        console.log(`[Loader] Finished loading all data. Generated ${initialHistoryWithDirectives.length / 2} sets of memories.`);
+        return initialHistoryWithDirectives;
+
     } catch (error) {
         console.error("Error loading game data from Google Sheets:", error);
         return null;
     }
 }
 
-// --- チャンネルごとの会話履歴を保持する変数 ---
 const channelHistories = new Map();
 
-// --- ヘルパー関数群 ---
 const parseDiceCommand = (input) => {
-    const match = input.match(/^(\d+)d(\d+)$/);
+    const match = input.match(/^!(\d+)d(\d+)$/i);
     if (!match) return null;
     const count = parseInt(match[1], 10), sides = parseInt(match[2], 10);
     return { count, sides };
 };
 const rollDice = (count, sides) => {
-    const rolls = [];
+    let rolls = [];
     for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
     return rolls;
 };
 
-// --- Discordイベントリスナー ---
 client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
 });
@@ -118,49 +135,45 @@ client.on('messageCreate', async message => {
     const command = message.content.trim();
 
     if (command.startsWith('!')) {
-        if (command === '!ver') { message.reply(`現在の私のバージョンは ${BOT_VERSION} です`); }
-        else if (command === '!ping') { message.reply('Pong!'); }
-        else {
-            const parsed = parseDiceCommand(command);
-            if (parsed) {
-                const { count, sides } = parsed;
-                if (count > 100 || sides > 1000) { message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）'); }
-                else {
-                    const results = rollDice(count, sides);
-                    const total = results.reduce((a, b) => a + b, 0);
-                    message.reply(`🎲 ${count}d${sides} の結果: [${results.join(', ')}] → 合計: ${total}`);
-                }
+        if (command === '!ver') { message.reply(`現在の私のバージョンは ${BOT_VERSION} です`); return; }
+        if (command === '!ping') { message.reply('Pong!'); return; }
+        
+        const parsed = parseDiceCommand(command);
+        if (parsed) {
+            const { count, sides } = parsed;
+            if (count > 100 || sides > 1000) { message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）'); }
+            else {
+                const results = rollDice(count, sides);
+                const total = results.reduce((a, b) => a + b, 0);
+                message.reply(`🎲 ${count}d${sides} の結果: [${results.join(', ')}] → 合計: ${total}`);
             }
+            return;
         }
-        return;
     }
 
     try {
-        const knowledgeText = await loadAndFormatAllDataForAI();
-        if (!knowledgeText) {
-            message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
+        const initialHistoryFromSheets = await loadAndFormatAllDataForAI();
+        if (!initialHistoryFromSheets || initialHistoryFromSheets.length === 0) {
+            message.reply('ごめんなさい、ギルドの台帳が今見つからないか、中身が空っぽみたい……');
             return;
         }
 
         const channelId = message.channel.id;
         const now = Date.now();
         let channelHistory = channelHistories.get(channelId);
-        
-        // ★★★★★ 最終アーキテクチャ：会話履歴に「偽の記憶」を注入 ★★★★★
-        const initialHistoryWithDirectives = [
-            { role: 'user', parts: [{ text: `User "${GUILD_MASTER_NAME}": "ノエル、よく聞きなさい。これが今、君が把握しておくべき全ての情報だ。一字一句違わずに頭に入れ、お客様への対応に活かすように。いいね？\n${knowledgeText}"` }] },
-            { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、ギルドマスター！全て承知いたしました！"` }] }
-        ];
 
         if (!channelHistory || (now - channelHistory.lastTimestamp > HISTORY_TIMEOUT)) {
-            channelHistory = { contents: JSON.parse(JSON.stringify(initialHistoryWithDirectives)), lastTimestamp: now };
+            channelHistory = { 
+                contents: JSON.parse(JSON.stringify(initialHistoryFromSheets)), 
+                lastTimestamp: now 
+            };
             channelHistories.set(channelId, channelHistory);
         }
+
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
         
-        // ★★★★★ ペルソナは、AIとしてのガードレールに徹する ★★★★★
         let personaText = `
 ### CORE DIRECTIVE: ROLE-PLAYING
 You are a character named ${BOT_PERSONA_NAME}. NEVER break character. NEVER mention that you are an AI.
@@ -170,6 +183,7 @@ You MUST respond in JAPANESE.
 `;
         
         const persona = { parts: [{ text: personaText }] };
+
         const request = {
             model: 'gemini-2.5-flash-lite',
             contents: channelHistory.contents,
@@ -211,10 +225,8 @@ You MUST respond in JAPANESE.
     }
 });
 
-// --- Discordボットのログイン ---
 client.login(process.env.DISCORD_TOKEN);
 
-// --- Renderスリープ対策用Webサーバー ---
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
