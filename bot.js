@@ -178,6 +178,11 @@ client.on('messageCreate', async message => {
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
 
+console.log("--- DEBUG: START of knowledgeText DATASET ---");
+        // knowledgeTextの最初の500文字をログに出力します
+        console.log(gameData.knowledgeText.substring(0, 500));
+        console.log("--- DEBUG: END of knowledgeText DATASET ---");
+
         let personaText = `
 ### CORE DIRECTIVE: STRICT ROLE-PLAYING SCENARIO
 You are NOT a large language model, AI, or bot. You are a character.
