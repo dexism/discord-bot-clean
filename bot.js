@@ -56,6 +56,7 @@ async function loadPersonaText() {
         return null;
     }
 }
+
 async function loadAndFormatAllDataForAI() {
     try {
         const serviceAccountAuth = new JWT({
@@ -139,6 +140,7 @@ const parseDiceCommand = (input) => {
     const count = parseInt(match[1], 10), sides = parseInt(match[2], 10);
     return { count, sides };
 };
+
 const rollDice = (count, sides) => {
     let rolls = [];
     for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
@@ -287,12 +289,30 @@ You MUST respond in JAPANESE.
 
 // --- インタラクション（コマンド・ボタン）受信時処理 ---
 const classDetails = {
-    merchant: { name: '商人', description: "## **商人**\n交渉力と市場感覚に優れ、原価を徹底的に削ることで利益を最大化する**合理的経営者**。信用を重んじ、実利を追求します。" },
-    artisan: { name: '職人', description: "## **職人**\n技術力と創造力に秀でた職人。展示会で名声を高め、唯一無二のブランドを築きます。**芸術と品質を両立する匠**です。" },
-    leader: { name: 'リーダー', description: "## **リーダー**\n地域との絆を活かし、専属契約や地元資源の活用に長けた**統率者**。信用度が非常に高く、地元民からの信頼も厚いのが特徴です。" },
-    researcher: { name: '研究者', description: "## **研究者**\n技術力と創造力が突出した研究者。新素材や魔道具の融合で産業革命を起こす可能性を秘めた**挑戦者**です。" },
-    magnate: { name: 'マグナート', description: "## **マグナート**\n複数事業を同時に展開する**経済貴族**。組織適応力と市場感覚に優れ、雇用・育成・投資に長けています。" },
-    trader: { name: 'トレーダー', description: "## **トレーダー**\n交渉力と市場感覚に長け、為替や関税を操る**交易の達人**。国際的な信頼を築き、外交と経済の架け橋となります。" },
+    merchant: { 
+        name: '商人', 
+        description: "## **商人**\n交渉力と市場感覚に優れ、原価を徹底的に削ることで利益を最大化する**合理的経営者**。信用を重んじ、実利を追求します。" 
+    },
+    artisan: { 
+        name: '職人', 
+        description: "## **職人**\n技術力と創造力に秀でた職人。展示会で名声を高め、唯一無二のブランドを築きます。**芸術と品質を両立する匠**です。" 
+    },
+    leader: { 
+        name: 'リーダー', 
+        description: "## **リーダー**\n地域との絆を活かし、専属契約や地元資源の活用に長けた**統率者**。信用度が非常に高く、地元民からの信頼も厚いのが特徴です。" 
+    },
+    engineer: { 
+        name: 'エンジニア', 
+        description: "## **エンジニア**\n技術力と創造力が突出した研究者。新素材や魔道具の融合で産業革命を起こす可能性を秘めた**挑戦者**です。" 
+    },
+    magnate: { 
+        name: 'マグナート', 
+        description: "## **マグナート**\n複数事業を同時に展開する**経済貴族**。組織適応力と市場感覚に優れ、雇用・育成・投資に長けています。" 
+    },
+    trader: { 
+        name: 'トレーダー', 
+        description: "## **トレーダー**\n交渉力と市場感覚に長け、為替や関税を操る**交易の達人**。国際的な信頼を築き、外交と経済の架け橋となります。" 
+    },
 };
 
 client.on('interactionCreate', async interaction => {
@@ -418,7 +438,7 @@ function getClassListComponents() {
         new ButtonBuilder().setCustomId('class_details_leader').setLabel('リーダーについて詳しく聞く').setStyle(ButtonStyle.Primary),
     );
     const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('class_details_researcher').setLabel('研究者について詳しく聞く').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('class_details_engineer').setLabel('エンジニアについて詳しく聞く').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('class_details_magnate').setLabel('マグナートについて詳しく聞く').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('class_details_trader').setLabel('トレーダーについて詳しく聞く').setStyle(ButtonStyle.Primary),
     );
