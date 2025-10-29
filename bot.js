@@ -1,5 +1,5 @@
 // =agreed================================================================================
-// TRPGサポートDiscordボント "ノエル" v3.8.3 (詳細メニュー追加版)
+// TRPGサポートDiscordボット "ノエル" v3.8.4 (AI応答ロジック復元版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,7 +10,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.8.3';
+const BOT_VERSION = 'v3.8.4';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 const GUILD_MASTER_NAME = 'ギルドマスター';
@@ -169,7 +169,115 @@ client.on('messageCreate', async message => {
 
     // --- AI応答ロジック (既存のまま) ---
     try {
-        // ... (AI応答ロジックは一切変更ありません) ...
+        const now = Date.now();
+        const channelId = message.channel.id;
+
+        if (!channelParticipants.has(channelId)) {
+            channelParticipants.set(channelId, new Map());
+        }
+        const participants = channelParticipants.get(channelId);
+        participants.set(message.author.id, now);
+
+        const recentParticipants = new Set();
+        for (const [userId, timestamp] of participants.entries()) {
+            if (now - timestamp < PARTICIPANT_TRACKING_DURATION) {
+                recentParticipants.add(userId);
+            } else {
+                participants.delete(userId);
+            }
+        }
+        const participantCount = recentParticipants.size;
+        console.log(`[Participant Logic] Active participants: ${participantCount}`);
+
+        const isAddressedToNoelle = message.content.includes(BOT_PERSONA_NAME) || message.mentions.has(client.user);
+        
+        const loadedPersonaText = await loadPersonaText();
+        const initialHistoryFromSheets = await loadAndFormatAllDataForAI();
+
+        if (!initialHistoryFromSheets) {
+            message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
+            return;
+        }
+        
+        let channelHistory = channelHistories.get(channelId);
+
+        if (!channelHistory || (now - channelHistory.lastTimestamp > HISTORY_TIMEOUT)) {
+            channelHistory = { 
+                contents: JSON.parse(JSON.stringify(initialHistoryFromSheets)), 
+                lastTimestamp: now 
+            };
+            channelHistories.set(channelId, channelHistory);
+        }
+
+        const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
+        channelHistory.contents.push(userMessage);
+        channelHistory.lastTimestamp = now;
+        
+        let personaText = loadedPersonaText;
+        if (!personaText) {
+            personaText = `
+### CORE DIRECTIVE: ROLE-PLAYING
+You are a character named ${BOT_PERSONA_NAME}. NEVER break character. NEVER mention that you are an AI.
+Your personality and all you know about the world are defined by the conversation history.
+Your task is to continue the conversation naturally as your character.
+You MUST respond in JAPANESE.
+`;
+        }
+        
+        const persona = { parts: [{ text: personaText }] };
+        const request = {
+            model: 'gemini-2.5-flash-lite',
+            contents: channelHistory.contents,
+            systemInstruction: persona
+        };
+        
+        const generateContentWithRetry = async (request, maxRetries = 5) => {
+            let lastError = null;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    return await ai.models.generateContent(request);
+                } catch (error) {
+                    lastError = error;
+                    if (error.toString().includes('429')) {
+                        const delay = (2 ** i) * 1000 + Math.random() * 1000;
+                        console.warn(`Rate limit exceeded. Retrying in ${Math.round(delay / 1000)}s...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else { throw error; }
+                }
+            }
+            console.error("All retries failed.");
+            throw lastError;
+        };
+
+        const response = await generateContentWithRetry(request);
+        const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '[IGNORE]';
+        
+        if (reply.includes('[IGNORE]')) {
+            console.log('[Participant Logic] AI decided to ignore.');
+            return; 
+        }
+
+        if (isAddressedToNoelle) {
+            console.log('[Participant Logic] Addressed to Noelle. Replying.');
+        } else {
+            const replyProbability = 1 / (participantCount || 1);
+            if (Math.random() > replyProbability) {
+                console.log(`[Participant Logic] Not replying due to probability check (${replyProbability.toFixed(2)}).`);
+                return;
+            }
+            console.log(`[Participant Logic] Replying based on probability (${replyProbability.toFixed(2)}).`);
+        }
+        
+        let finalReply = reply.trim();
+        const match = finalReply.match(/^(?:"?ノエル"?:\s*)?"?(.*?)"?$/);
+        if (match && match[1]) {
+            finalReply = match[1].trim();
+        }
+        
+        message.reply(finalReply);
+        channelHistory.contents.push({ role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${finalReply}"` }] });
+        channelHistory.lastTimestamp = now;
+        
     } catch (error) {
         console.error('Error in messageCreate:', error);
         message.reply('あ、すみません……ちょっと考えごとをしてました！');
