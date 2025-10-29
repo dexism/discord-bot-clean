@@ -31,5 +31,6 @@ git commit -m $commitMessage
 # git pull
 
 # 6. GitHub に push（Netlify がこれをトリガーに自動デプロイ）
-# 強制的にリモートの内容をローカルのコードで上書き
-git push origin main --force
+git push
+# 強制的にリモートの内容をローカルのコードで上書きする場合は以下を使用
+# git push origin main --force

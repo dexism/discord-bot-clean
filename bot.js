@@ -1,16 +1,16 @@
 // =agreed================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.8.0 (スラッシュコマンド対応版)
+// TRPGサポートDiscordボット "ノエル" v3.8.1 (インタラクション安定化版)
 // =================================================================================
 
 require('dotenv').config();
 const { GoogleGenAI } = require('@google/genai');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionType } = require('discord.js'); // InteractionTypeを追加
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.8.0';
+const BOT_VERSION = 'v3.8.1';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 const GUILD_MASTER_NAME = 'ギルドマスター';
@@ -177,7 +177,7 @@ client.on('messageCreate', async message => {
 });
 
 client.on('interactionCreate', async interaction => {
-    // ★★★★★【機能追加】スラッシュコマンドの処理を追加 ★★★★★
+    // --- スラッシュコマンドの処理 ---
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
 
@@ -190,76 +190,82 @@ client.on('interactionCreate', async interaction => {
         else if (commandName === 'menu') {
             const row = new ActionRowBuilder()
                 .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('menu_register')
-                        .setLabel('キャラクターを登録する')
-                        .setStyle(ButtonStyle.Success),
-                    new ButtonBuilder()
-                        .setCustomId('menu_status')
-                        .setLabel('ステータスを確認する')
-                        .setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder()
-                        .setCustomId('menu_board')
-                        .setLabel('依頼掲示板を見る')
-                        .setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder()
-                        .setCustomId('menu_leave')
-                        .setLabel('帰る')
-                        .setStyle(ButtonStyle.Secondary)
+                    new ButtonBuilder().setCustomId('menu_register').setLabel('キャラクターを登録する').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId('menu_status').setLabel('ステータスを確認する').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('menu_board').setLabel('依頼掲示板を見る').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('menu_leave').setLabel('帰る').setStyle(ButtonStyle.Secondary)
                 );
-
-            await interaction.reply({
-                content: 'いらっしゃいませ！なにをお望みですか？',
-                components: [row]
-            });
+            await interaction.reply({ content: 'いらっしゃいませ！なにをお望みですか？', components: [row] });
         }
-        return; // スラッシュコマンド処理後はここで終了
+        return;
     }
 
-    // ★★★★★【既存の処理】ボタンが押された時の処理 (変更なし) ★★★★★
+    // --- ボタンの処理 ---
     if (interaction.isButton()) {
         if (!interaction.customId.startsWith('menu_')) return;
-        const channelId = interaction.channel.id;
-        let channelHistory = channelHistories.get(channelId);
-        if (!channelHistory) {
-            channelHistory = { contents: [], lastTimestamp: Date.now() };
-            channelHistories.set(channelId, channelHistory);
+
+        try {
+            // 1. まず「処理中...」と即時応答し、3秒タイムアウトを回避する
+            await interaction.deferReply({ ephemeral: true });
+
+            const channelId = interaction.channel.id;
+            let channelHistory = channelHistories.get(channelId);
+            if (!channelHistory) {
+                channelHistory = { contents: [], lastTimestamp: Date.now() };
+                channelHistories.set(channelId, channelHistory);
+            }
+
+            let userActionText = '';
+            let replyText = '';
+
+            switch (interaction.customId) {
+                case 'menu_register':
+                    userActionText = '「キャラクターを登録する」を選んだ';
+                    replyText = 'はい、キャラクター登録ですね。承知いたしました。（以降の処理は未実装です）';
+                    break;
+                case 'menu_status':
+                    userActionText = '「ステータスを確認する」を選んだ';
+                    replyText = 'はい、ステータスの確認ですね。承知いたしました。（以降の処理は未実装です）';
+                    break;
+                case 'menu_board':
+                    userActionText = '「依頼掲示板を見る」を選んだ';
+                    replyText = 'はい、こちらが依頼掲示板です。（以降の処理は未実装です）';
+                    break;
+                case 'menu_leave':
+                    userActionText = '「帰る」を選んだ';
+                    replyText = '承知いたしました。またお越しくださいませ。';
+                    break;
+                default:
+                    // 不明なボタンの場合は、応答を削除して終了
+                    await interaction.deleteReply();
+                    return;
+            }
+
+            // 2. 処理が終わった後、応答を編集する
+            await interaction.editReply({ content: replyText });
+
+            // 3. 履歴の更新などの事後処理を行う
+            const now = Date.now();
+            const userMessage = { role: 'user', parts: [{ text: `User "${interaction.user.displayName}": "${userActionText}"` }] };
+            channelHistory.contents.push(userMessage);
+            channelHistory.lastTimestamp = now;
+            const modelMessage = { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${replyText}"` }] };
+            channelHistory.contents.push(modelMessage);
+            channelHistory.lastTimestamp = now;
+            console.log(`[Menu Logic] User ${interaction.user.displayName} selected "${interaction.component.label}". History updated.`);
+
+            const originalMessage = interaction.message;
+            const disabledRow = ActionRowBuilder.from(originalMessage.components[0]);
+            disabledRow.components.forEach(component => component.setDisabled(true));
+            await originalMessage.edit({ components: [disabledRow] });
+            
+        } catch (error) {
+            console.error('Error in button interaction:', error);
+            // エラーが発生した場合でも、ユーザーに応答を試みる
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply({ content: 'すみません、エラーが発生しました。', components: [] }).catch(() => {});
+            }
         }
-        let userActionText = '';
-        let replyText = '';
-        switch (interaction.customId) {
-            case 'menu_register':
-                userActionText = '「キャラクターを登録する」を選んだ';
-                replyText = 'はい、キャラクター登録ですね。承知いたしました。（以降の処理は未実装です）';
-                break;
-            case 'menu_status':
-                userActionText = '「ステータスを確認する」を選んだ';
-                replyText = 'はい、ステータスの確認ですね。承知いたしました。（以降の処理は未実装です）';
-                break;
-            case 'menu_board':
-                userActionText = '「依頼掲示板を見る」を選んだ';
-                replyText = 'はい、こちらが依頼掲示板です。（以降の処理は未実装です）';
-                break;
-            case 'menu_leave':
-                userActionText = '「帰る」を選んだ';
-                replyText = '承知いたしました。またお越しくださいませ。';
-                break;
-            default:
-                return;
-        }
-        await interaction.reply({ content: replyText, ephemeral: true });
-        const now = Date.now();
-        const userMessage = { role: 'user', parts: [{ text: `User "${interaction.user.displayName}": "${userActionText}"` }] };
-        channelHistory.contents.push(userMessage);
-        channelHistory.lastTimestamp = now;
-        const modelMessage = { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${replyText}"` }] };
-        channelHistory.contents.push(modelMessage);
-        channelHistory.lastTimestamp = now;
-        console.log(`[Menu Logic] User ${interaction.user.displayName} selected "${interaction.component.label}". History updated.`);
-        const originalMessage = interaction.message;
-        const disabledRow = ActionRowBuilder.from(originalMessage.components[0]);
-        disabledRow.components.forEach(component => component.setDisabled(true));
-        await originalMessage.edit({ components: [disabledRow] });
     }
 });
 
