@@ -1,3 +1,4 @@
 .env
 discord-bot-476315-308cfda1862a.json
 deploy.ps1
+deploy-commands.js

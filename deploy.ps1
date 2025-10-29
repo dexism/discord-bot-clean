@@ -28,7 +28,8 @@ if ($args.Count -eq 0) {
 git commit -m $commitMessage
 
 # 5. リモートの変更を取得
-git pull
+# git pull
 
 # 6. GitHub に push（Netlify がこれをトリガーに自動デプロイ）
-git push
+# 強制的にリモートの内容をローカルのコードで上書き
+git push origin main --force
