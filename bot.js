@@ -1,16 +1,16 @@
 // =agreed================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.8.1 (インタラクション安定化版)
+// TRPGサポートDiscordボント "ノエル" v3.8.3 (詳細メニュー追加版)
 // =================================================================================
 
 require('dotenv').config();
 const { GoogleGenAI } = require('@google/genai');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionType } = require('discord.js'); // InteractionTypeを追加
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionType } = require('discord.js');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.8.1';
+const BOT_VERSION = 'v3.8.3';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 const GUILD_MASTER_NAME = 'ギルドマスター';
@@ -176,9 +176,18 @@ client.on('messageCreate', async message => {
     }
 });
 
+const classDetails = {
+    merchant: { name: '商人', description: "## **商人**\n交渉力と市場感覚に優れ、原価を徹底的に削ることで利益を最大化する**合理的経営者**。信用を重んじ、実利を追求します。" },
+    artisan: { name: '職人', description: "## **職人**\n技術力と創造力に秀でた職人。展示会で名声を高め、唯一無二のブランドを築きます。**芸術と品質を両立する匠**です。" },
+    leader: { name: 'リーダー', description: "## **リーダー**\n地域との絆を活かし、専属契約や地元資源の活用に長けた**統率者**。信用度が非常に高く、地元民からの信頼も厚いのが特徴です。" },
+    researcher: { name: '研究者', description: "## **研究者**\n技術力と創造力が突出した研究者。新素材や魔道具の融合で産業革命を起こす可能性を秘めた**挑戦者**です。" },
+    magnate: { name: 'マグナート', description: "## **マグナート**\n複数事業を同時に展開する**経済貴族**。組織適応力と市場感覚に優れ、雇用・育成・投資に長けています。" },
+    trader: { name: 'トレーダー', description: "## **トレーダー**\n交渉力と市場感覚に長け、為替や関税を操る**交易の達人**。国際的な信頼を築き、外交と経済の架け橋となります。" },
+};
+
 client.on('interactionCreate', async interaction => {
-    // --- スラッシュコマンドの処理 (変更なし) ---
     if (interaction.isChatInputCommand()) {
+        // ... (スラッシュコマンドの処理は変更なし) ...
         const { commandName } = interaction;
         if (commandName === 'ping') { await interaction.reply('Pong!'); }
         else if (commandName === 'ver') { await interaction.reply(`現在の私のバージョンは ${BOT_VERSION} です`); }
@@ -195,20 +204,11 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-    // ★★★★★【修正】ボタン処理を拡張 ★★★★★
     if (interaction.isButton()) {
-        // customIdに応じて処理を振り分ける
-        const [action, subAction] = interaction.customId.split('_');
-
+        const [action, subAction, subject] = interaction.customId.split('_');
         try {
-            // --- メインメニューの処理 ---
-            if (action === 'menu') {
-                await handleMainMenu(interaction);
-            }
-            // --- クラス選択メニューの処理 ---
-            else if (action === 'class') {
-                await handleClassSelection(interaction);
-            }
+            if (action === 'menu') await handleMainMenu(interaction);
+            else if (action === 'class') await handleClassMenu(interaction);
         } catch (error) {
             console.error('Error in button interaction:', error);
             if (!interaction.replied && !interaction.deferred) {
@@ -220,35 +220,16 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// ★★★★★【機能追加】メインメニューのボタン処理を関数化 ★★★★★
+
 async function handleMainMenu(interaction) {
     const { customId } = interaction;
 
     if (customId === 'menu_register') {
-        // クラス選択メニューを作成
-        const classDescription = "キャラクタークラスを選択してください。\nあなたの経営者としての第一歩は、いずれかの「プライムクラス」から始まります。\nプライムクラスは、健全で信頼される経営スタイルを体現する存在です。\nあなたの選択は、今後の戦略・人脈・評判・そして“闇”への可能性をも左右します。";
-        
-        const row1 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('class_merchant').setLabel('商人：交渉力と市場感覚に優れ、原価を徹底的に削ることで利益を最大化する合理的経営者。信用を重んじ、実利を追求する。').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('class_artisan').setLabel('職人：技術力と創造力に秀でた職人。展示会で名声を高め、唯一無二のブランドを築く。芸術と品質を両立する匠。').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('class_leader').setLabel('リーダー：地域との絆を活かし、専属契約や地元資源の活用に長けた統率者。信用度が非常に高く、地元民からの信頼も厚い。').setStyle(ButtonStyle.Primary)
-        );
-        const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('class_researcher').setLabel('研究者：技術力と創造力が突出した研究者。新素材や魔道具の融合で産業革命を起こす可能性を秘めた挑戦者。').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('class_magnate').setLabel('マグナート：複数事業を同時に展開する経済貴族。組織適応力と市場感覚に優れ、雇用・育成・投資に長ける。').setStyle(ButtonStyle.Primary)
-        );
-        const row3 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('class_trader').setLabel('トレーダー：交渉力と市場感覚に長け、為替や関税を操る交易の達人。国際的な信頼を築き、外交と経済の架け橋となる。').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('menu_return').setLabel('キャンセルしてメニューに戻る').setStyle(ButtonStyle.Secondary)
-        );
-
-        // 元のメッセージを編集して、クラス選択メニューに差し替える
-        await interaction.update({ content: classDescription, components: [row1, row2, row3] });
+        await interaction.update(getClassListComponents());
         return;
     }
 
     if (customId === 'menu_return') {
-        // メインメニューを再表示
         const row = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder().setCustomId('menu_register').setLabel('キャラクターを登録する').setStyle(ButtonStyle.Success),
@@ -259,31 +240,18 @@ async function handleMainMenu(interaction) {
         await interaction.update({ content: 'いらっしゃいませ！なにをお望みですか？', components: [row] });
         return;
     }
-
-
+    
+    // ... (menu_status, board, leave の処理は変更なし) ...
     await interaction.deferReply({ ephemeral: true });
-
-    let userActionText = '';
-    let replyText = '';
+    let userActionText = '', replyText = '';
     switch (customId) {
-        case 'menu_status':
-            userActionText = '「ステータスを確認する」を選んだ';
-            replyText = 'はい、ステータスの確認ですね。承知いたしました。（以降の処理は未実装です）';
-            break;
-        case 'menu_board':
-            userActionText = '「依頼掲示板を見る」を選んだ';
-            replyText = 'はい、こちらが依頼掲示板です。（以降の処理は未実装です）';
-            break;
-        case 'menu_leave':
-            userActionText = '「帰る」を選んだ';
-            replyText = '承知いたしました。またお越しくださいませ。';
-            break;
-        default:
-            await interaction.deleteReply(); return;
+        case 'menu_status': userActionText = '「ステータスを確認する」を選んだ'; replyText = 'はい、ステータスの確認ですね。承知いたしました。（以降の処理は未実装です）'; break;
+        case 'menu_board': userActionText = '「依頼掲示板を見る」を選んだ'; replyText = 'はい、こちらが依頼掲示板です。（以降の処理は未実装です）'; break;
+        case 'menu_leave': userActionText = '「帰る」を選んだ'; replyText = '承知いたしました。またお越しくださいませ。'; break;
+        default: await interaction.deleteReply(); return;
     }
-
     await interaction.editReply({ content: replyText });
-    updateInteractionHistory(interaction, userActionText, replyText); // 履歴更新処理を共通化
+    updateInteractionHistory(interaction, userActionText, replyText);
     const originalMessage = interaction.message;
     const disabledRow = ActionRowBuilder.from(originalMessage.components[0]);
     disabledRow.components.forEach(component => component.setDisabled(true));
@@ -291,43 +259,76 @@ async function handleMainMenu(interaction) {
 }
 
 
-// ★★★★★【機能追加】クラス選択のボタン処理をする関数 ★★★★★
-async function handleClassSelection(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-    
-    const { customId } = interaction;
-    let className = '';
-    
-    // customIdからクラス名を取得
-    switch (customId) {
-        case 'class_merchant': className = '商人'; break;
-        case 'class_artisan': className = '職人'; break;
-        case 'class_leader': className = 'リーダー'; break;
-        case 'class_researcher': className = '研究者'; break;
-        case 'class_magnate': className = 'マグナート'; break;
-        case 'class_trader': className = 'トレーダー'; break;
-        default: await interaction.deleteReply(); return;
+// ★★★★★【修正】クラス関連のメニュー処理をまとめる ★★★★★
+async function handleClassMenu(interaction) {
+    const [action, subAction, subject] = interaction.customId.split('_');
+
+    // 「選択メニューに戻る」ボタンの処理
+    if (subAction === 'return' && subject === 'list') {
+        await interaction.update(getClassListComponents());
+        return;
     }
 
-    const userActionText = `クラスとして「${className}」を選んだ`;
-    const replyText = `はい、クラス「${className}」ですね。承知いたしました。（以降の処理は未実装です）`;
+    // 「詳しく聞く」ボタンの処理
+    if (subAction === 'details') {
+        const classInfo = classDetails[subject];
+        if (!classInfo) return; // 不明なクラスは無視
 
-    await interaction.editReply({ content: replyText });
-    updateInteractionHistory(interaction, userActionText, replyText);
-    
-    // ボタンを無効化
-    const originalMessage = interaction.message;
-    const disabledComponents = originalMessage.components.map(row => {
-        const newRow = ActionRowBuilder.from(row);
-        newRow.components.forEach(component => component.setDisabled(true));
-        return newRow;
-    });
-    await originalMessage.edit({ components: disabledComponents });
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`class_select_${subject}`).setLabel(`${classInfo.name}を選択する`).setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('class_return_list').setLabel('選択メニューに戻る').setStyle(ButtonStyle.Secondary)
+        );
+
+        await interaction.update({ content: classInfo.description, components: [row] });
+        return;
+    }
+
+    // 「〇〇を選択する」ボタンの処理
+    if (subAction === 'select') {
+        await interaction.deferReply({ ephemeral: true });
+        const classInfo = classDetails[subject];
+        if (!classInfo) return;
+
+        const userActionText = `クラスとして「${classInfo.name}」を最終選択した`;
+        const replyText = `はい、あなたのクラスは「${classInfo.name}」に決定しました。ようこそ！（以降の処理は未実装です）`;
+
+        await interaction.editReply({ content: replyText });
+        updateInteractionHistory(interaction, userActionText, replyText);
+
+        const originalMessage = interaction.message;
+        const disabledComponents = originalMessage.components.map(row => {
+            const newRow = ActionRowBuilder.from(row);
+            newRow.components.forEach(component => component.setDisabled(true));
+            return newRow;
+        });
+        await originalMessage.edit({ components: disabledComponents });
+    }
 }
 
 
-// ★★★★★【機能追加】インタラクションの履歴を保存する共通関数 ★★★★★
+// ★★★★★【機能追加】クラス一覧のコンポーネントを生成する共通関数 ★★★★★
+function getClassListComponents() {
+    const content = "## **キャラクタークラス選択**\nあなたの経営者としての第一歩は、いずれかの「プライムクラス」から始まります。\nプライムクラスは、健全で信頼される経営スタイルを体現する存在です。\nあなたの選択は、今後の戦略・人脈・評判・そして“闇”への可能性をも左右します。\n\n**詳しく知りたいクラスを選択してください。**";
+
+    const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('class_details_merchant').setLabel('商人について詳しく聞く').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('class_details_artisan').setLabel('職人について詳しく聞く').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('class_details_leader').setLabel('リーダーについて詳しく聞く').setStyle(ButtonStyle.Primary),
+    );
+    const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('class_details_researcher').setLabel('研究者について詳しく聞く').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('class_details_magnate').setLabel('マグナートについて詳しく聞く').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('class_details_trader').setLabel('トレーダーについて詳しく聞く').setStyle(ButtonStyle.Primary),
+    );
+    const row3 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('menu_return').setLabel('メインメニューに戻る').setStyle(ButtonStyle.Secondary)
+    );
+
+    return { content, components: [row1, row2, row3] };
+}
+
 function updateInteractionHistory(interaction, userActionText, replyText) {
+    // ... (履歴保存の共通関数は変更なし) ...
     const channelId = interaction.channel.id;
     let channelHistory = channelHistories.get(channelId);
     if (!channelHistory) {
@@ -335,14 +336,10 @@ function updateInteractionHistory(interaction, userActionText, replyText) {
         channelHistories.set(channelId, channelHistory);
     }
     const now = Date.now();
-    const userMessage = { 
-        role: 'user', parts: [{ text: `User "${interaction.user.displayName}": "${userActionText}"` }] 
-    };
+    const userMessage = { role: 'user', parts: [{ text: `User "${interaction.user.displayName}": "${userActionText}"` }] };
     channelHistory.contents.push(userMessage);
     channelHistory.lastTimestamp = now;
-    const modelMessage = { 
-        role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${replyText}"` }] 
-    };
+    const modelMessage = { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${replyText}"` }] };
     channelHistory.contents.push(modelMessage);
     channelHistory.lastTimestamp = now;
     console.log(`[Interaction Logic] User ${interaction.user.displayName} action: "${userActionText}". History updated.`);
