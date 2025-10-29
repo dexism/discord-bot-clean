@@ -1,5 +1,5 @@
 // =agreed================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.8.4 (AI応答ロジック復元版)
+// TRPGサポートDiscordボット "ノエル" v3.8.5 (スラッシュコマンド安定化版)
 // =================================================================================
 
 require('dotenv').config();
@@ -10,13 +10,13 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.8.4';
+const BOT_VERSION = 'v3.8.5';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 const GUILD_MASTER_NAME = 'ギルドマスター';
 const PARTICIPANT_TRACKING_DURATION = 10 * 60 * 1000;
 
-// (既存の loadPersonaText, loadAndFormatAllDataForAI, ヘルパー関数に変更はありません)
+// --- クライアント初期化 ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
@@ -24,7 +24,7 @@ const client = new Client({
 const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
-// (既存の loadPersonaText, loadAndFormatAllDataForAI 関数に変更はありません)
+// --- Googleスプレッドシート連携関数 ---
 async function loadPersonaText() {
     try {
         const serviceAccountAuth = new JWT({
@@ -128,31 +128,33 @@ async function loadAndFormatAllDataForAI() {
     }
 }
 
+// --- グローバル変数 ---
 const channelHistories = new Map();
 const channelParticipants = new Map();
 
+// --- ヘルパー関数 ---
 const parseDiceCommand = (input) => {
     const match = input.match(/^!(\d+)d(\d+)$/i);
     if (!match) return null;
     const count = parseInt(match[1], 10), sides = parseInt(match[2], 10);
     return { count, sides };
 };
-
 const rollDice = (count, sides) => {
     let rolls = [];
     for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
     return rolls;
 };
 
+// --- Bot起動時処理 ---
 client.once('clientReady', () => {
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
 });
 
+// --- メッセージ受信時処理 ---
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
     const command = message.content.trim();
 
-    // --- コマンド判定 ---
     if (command.startsWith('!')) {
         const parsed = parseDiceCommand(command);
         if (parsed) {
@@ -167,7 +169,6 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // --- AI応答ロジック (既存のまま) ---
     try {
         const now = Date.now();
         const channelId = message.channel.id;
@@ -284,6 +285,7 @@ You MUST respond in JAPANESE.
     }
 });
 
+// --- インタラクション（コマンド・ボタン）受信時処理 ---
 const classDetails = {
     merchant: { name: '商人', description: "## **商人**\n交渉力と市場感覚に優れ、原価を徹底的に削ることで利益を最大化する**合理的経営者**。信用を重んじ、実利を追求します。" },
     artisan: { name: '職人', description: "## **職人**\n技術力と創造力に秀でた職人。展示会で名声を高め、唯一無二のブランドを築きます。**芸術と品質を両立する匠**です。" },
@@ -295,19 +297,32 @@ const classDetails = {
 
 client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand()) {
-        // ... (スラッシュコマンドの処理は変更なし) ...
         const { commandName } = interaction;
-        if (commandName === 'ping') { await interaction.reply('Pong!'); }
-        else if (commandName === 'ver') { await interaction.reply(`現在の私のバージョンは ${BOT_VERSION} です`); }
-        else if (commandName === 'menu') {
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder().setCustomId('menu_register').setLabel('キャラクターを登録する').setStyle(ButtonStyle.Success),
-                    new ButtonBuilder().setCustomId('menu_status').setLabel('ステータスを確認する').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId('menu_board').setLabel('依頼掲示板を見る').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId('menu_leave').setLabel('帰る').setStyle(ButtonStyle.Secondary)
-                );
-            await interaction.reply({ content: 'いらっしゃいませ！なにをお望みですか？', components: [row] });
+        try {
+            // ★★★★★【修正】全てのコマンドで、最初に deferReply を実行する ★★★★★
+            if (commandName === 'ping' || commandName === 'ver' || commandName === 'menu') {
+                // menuコマンドはボタンが表示されるので、ephemeralではない通常の応答をdeferする
+                await interaction.deferReply({ ephemeral: commandName !== 'menu' });
+            }
+
+            if (commandName === 'ping') {
+                await interaction.editReply('Pong!');
+            }
+            else if (commandName === 'ver') {
+                await interaction.editReply(`現在の私のバージョンは ${BOT_VERSION} です`);
+            }
+            else if (commandName === 'menu') {
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder().setCustomId('menu_register').setLabel('キャラクターを登録する').setStyle(ButtonStyle.Success),
+                        new ButtonBuilder().setCustomId('menu_status').setLabel('ステータスを確認する').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId('menu_board').setLabel('依頼掲示板を見る').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId('menu_leave').setLabel('帰る').setStyle(ButtonStyle.Secondary)
+                    );
+                await interaction.editReply({ content: 'いらっしゃいませ！なにをお望みですか？', components: [row] });
+            }
+        } catch(error) {
+            console.error(`Error handling slash command ${commandName}:`, error);
         }
         return;
     }
@@ -328,15 +343,12 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-
 async function handleMainMenu(interaction) {
     const { customId } = interaction;
-
     if (customId === 'menu_register') {
         await interaction.update(getClassListComponents());
         return;
     }
-
     if (customId === 'menu_return') {
         const row = new ActionRowBuilder()
             .addComponents(
@@ -348,8 +360,6 @@ async function handleMainMenu(interaction) {
         await interaction.update({ content: 'いらっしゃいませ！なにをお望みですか？', components: [row] });
         return;
     }
-    
-    // ... (menu_status, board, leave の処理は変更なし) ...
     await interaction.deferReply({ ephemeral: true });
     let userActionText = '', replyText = '';
     switch (customId) {
@@ -366,43 +376,30 @@ async function handleMainMenu(interaction) {
     await originalMessage.edit({ components: [disabledRow] });
 }
 
-
-// ★★★★★【修正】クラス関連のメニュー処理をまとめる ★★★★★
 async function handleClassMenu(interaction) {
     const [action, subAction, subject] = interaction.customId.split('_');
-
-    // 「選択メニューに戻る」ボタンの処理
     if (subAction === 'return' && subject === 'list') {
         await interaction.update(getClassListComponents());
         return;
     }
-
-    // 「詳しく聞く」ボタンの処理
     if (subAction === 'details') {
         const classInfo = classDetails[subject];
-        if (!classInfo) return; // 不明なクラスは無視
-
+        if (!classInfo) return;
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`class_select_${subject}`).setLabel(`${classInfo.name}を選択する`).setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('class_return_list').setLabel('選択メニューに戻る').setStyle(ButtonStyle.Secondary)
         );
-
         await interaction.update({ content: classInfo.description, components: [row] });
         return;
     }
-
-    // 「〇〇を選択する」ボタンの処理
     if (subAction === 'select') {
         await interaction.deferReply({ ephemeral: true });
         const classInfo = classDetails[subject];
         if (!classInfo) return;
-
         const userActionText = `クラスとして「${classInfo.name}」を最終選択した`;
         const replyText = `はい、あなたのクラスは「${classInfo.name}」に決定しました。ようこそ！（以降の処理は未実装です）`;
-
         await interaction.editReply({ content: replyText });
         updateInteractionHistory(interaction, userActionText, replyText);
-
         const originalMessage = interaction.message;
         const disabledComponents = originalMessage.components.map(row => {
             const newRow = ActionRowBuilder.from(row);
@@ -413,11 +410,8 @@ async function handleClassMenu(interaction) {
     }
 }
 
-
-// ★★★★★【機能追加】クラス一覧のコンポーネントを生成する共通関数 ★★★★★
 function getClassListComponents() {
     const content = "## **キャラクタークラス選択**\nあなたの経営者としての第一歩は、いずれかの「プライムクラス」から始まります。\nプライムクラスは、健全で信頼される経営スタイルを体現する存在です。\nあなたの選択は、今後の戦略・人脈・評判・そして“闇”への可能性をも左右します。\n\n**詳しく知りたいクラスを選択してください。**";
-
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('class_details_merchant').setLabel('商人について詳しく聞く').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('class_details_artisan').setLabel('職人について詳しく聞く').setStyle(ButtonStyle.Primary),
@@ -431,12 +425,10 @@ function getClassListComponents() {
     const row3 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('menu_return').setLabel('メインメニューに戻る').setStyle(ButtonStyle.Secondary)
     );
-
     return { content, components: [row1, row2, row3] };
 }
 
 function updateInteractionHistory(interaction, userActionText, replyText) {
-    // ... (履歴保存の共通関数は変更なし) ...
     const channelId = interaction.channel.id;
     let channelHistory = channelHistories.get(channelId);
     if (!channelHistory) {
@@ -453,8 +445,10 @@ function updateInteractionHistory(interaction, userActionText, replyText) {
     console.log(`[Interaction Logic] User ${interaction.user.displayName} action: "${userActionText}". History updated.`);
 }
 
-// (Discordボットログイン、Webサーバーのコードに変更はありません)
+// --- Discordボットのログイン ---
 client.login(process.env.DISCORD_TOKEN);
+
+// --- Renderスリープ対策用Webサーバー ---
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
