@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>運命を刻む元帳 ベンチャー of テイルズ TRPG(仮)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>運命を刻む元帳</h1>
+            <h2>ベンチャー of テイルズ TRPG(仮)</h2>
+            <p>～Pilot Season: 黄金と砂塵のモノローグ～</p>
+            <p class="sub-title">基本ルールブック</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <nav class="sidebar">
+            <h3>目次</h3>
+            <ul>
+                <li>
+                    <details>
+                        <summary><a href="#hajimeni">1 はじめに</a></summary>
+                        <ul>
+                            <li><a href="#trailer">1.1 トレーラー</a></li>
+                            <li><a href="#welcome">1.2 ようこそ</a></li>
+                            <li><a href="#replay">1.3 イメージリプレイ</a></li>
+                            <li><a href="#gaiyou">1.4 ゲームの概要</a></li>
+                            <li><a href="#sekai">1.5 舞台となる世界</a></li>
+                            <li><a href="#keiei">1.6 この世界における「経営」とは</a></li>
+                        </ul>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary><a href="#player-section">2 プレイヤーセクション</a></summary>
+                         <ul>
+                            <li><a href="#template-char">2.1 テンプレートキャラクター</a></li>
+                            <li><a href="#create-char">2.2 キャラクターの創造</a></li>
+                            <li><a href="#trpg-part">2.3 TRPGパート</a></li>
+                            <li><a href="#slg-part">2.4 経営SLGパート</a></li>
+                        </ul>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary><a href="#teller-section">3 テラーセクション</a></summary>
+                        <ul>
+                            <li><a href="#teller-prepare">3.1 セッションの準備</a></li>
+                            <li><a href="#teller-npc">3.2 世界を彩る人々（NPC）</a></li>
+                            <li><a href="#teller-manage">3.3 TRPGパートの進行管理</a></li>
+                            <li><a href="#teller-enemy">3.4 プレイヤーの前に立ちはだかるもの</a></li>
+                        </ul>
+                    </details>
+                </li>
+                 <li>
+                    <details>
+                        <summary><a href="#scenario-section">4 シナリオセクション</a></summary>
+                        <ul>
+                           <li><a href="#scenario-sample">4.1 サンプルシナリオ『暁のキャラバン』</a></li>
+                        </ul>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary><a href="#data-section">5 データセクション</a></summary>
+                         <ul>
+                           <li><a href="#class-list">5.1 クラス一覧</a></li>
+                           <li><a href="#skill-list">5.2 スキル一覧</a></li>
+                           <li><a href="#jigyo-list">5.3 事業一覧</a></li>
+                           <li><a href="#event-list">5.4 イベント一覧</a></li>
+                           <li><a href="#glossary">5.5 用語集</a></li>
+                        </ul>
+                    </details>
+                </li>
+            </ul>
+        </nav>
+
+        <main>
+            <!-- はじめに -->
+            <section id="hajimeni">
+                <h1>1 はじめに</h1>
+                <p>この章では、あなたがこれから飛び込むことになる『運命を刻む元帳 ベンチャー of テイルズ TRPG（仮）』の世界への扉を開きます。まずはここから読み進めてください。</p>
+                
+                <div class="comment-box">
+                    <h4>タイトル案に関する議論</h4>
+                    <p>※タイトルにレガシーが入ってても面白いと思います。<br>
+                    ・ベンチャー（Venture）：冒険、投機的な事業、新しい挑戦<br>
+                    ・レガシー（Legacy）：遺産、伝統、後世に残る価値<br>
+                    ・テイルズ（Teles）：語り継がれる物語、伝承、寓話、群像劇<br>
+                    ・元帳（Ledger）：会計帳簿、すべての取引を集約した最も重要な記録<br>
+                    <strong>個人的には「案１」「案６」</strong><br>
+                    <strong>承認：</strong>「副題+タイトル TRPG～シーズンタイトル～」の形式を採用。シーズン名が良い。
+                    </p>
+                </div>
+                
+                <article class="gm-name-box">
+                    <h3>GMの呼称について</h3>
+                    <p>このゲームでは、いわゆるGMのことを「テラー」と呼びます。<br>
+                    テラー（Teller）とは、「語り手」「記録者」を意味し、このゲームにおいて物語を語り、経営の記録を裁定する進行役のことを指しています。</p>
+                </article>
+
+                <article id="trailer">
+                    <h2>1.1 トレーラー</h2>
+                    <blockquote>
+                        <p>TRPGの冒険を終えた後、ふと、こう思ったことはないだろうか。</p>
+                        <p>「あのキャラクターは、今ごろ何をしているんだろう？」<br>「あの仲間たちと、また一緒に何かを成し遂げたい」と。</p>
+                        <p>その物語、ここでなら続けられる。</p>
+                        <p>ここは、セッションとセッションの「間」が、もう一つの冒険になる世界。</p>
+                        <p>（...以下、ご提供のテキストを挿入...）</p>
+                    </blockquote>
+                </article>
+
+                <article id="welcome">
+                    <h2>1.2 『運命を刻む元帳 ベンチャー of テイルズ TRPG（仮）』へようこそ</h2>
+                    <p>こんにちは！ 私は商業ギルドの「ノエル」と申します。このルールブックを手に取ってくださり、本当にありがとうございます。...</p>
+                    <!-- 以下、ご提供のテキストを挿入 -->
+                </article>
+
+                <article id="replay">
+                    <h2>1.3 イメージリプレイ：最初の選択</h2>
+                    <p>これは、あなたによく似た、ある駆け出しの経営者の物語。ゲームがどのように進むのか、少しだけ覗いてみましょう。</p>
+                    <div class="replay-dialogue">
+                        <p><span class="teller">テラー（TL）：</span>春の柔らかな日差しが、のどかな村道を照らしています。...</p>
+                        <p><span class="player">あなた：</span>「この蜂蜜酒のセットが全部売れたら、次の仕入れはもっと大きな街に行けるな...」</p>
+                        <!-- 以下、ご提供のテキストを挿入 -->
+                    </div>
+                </article>
+                
+                <!-- 1.4 ~ 1.6 の内容を同様に<article>タグで追加 -->
+                <article id="gaiyou">
+                    <h2>1.4 ゲームの概要</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="sekai">
+                    <h2>1.5 舞台となる世界</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="keiei">
+                    <h2>1.6 この世界における「経営」とは</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+            </section>
+            
+            <!-- プレイヤーセクション -->
+            <section id="player-section">
+                <h1>2 プレイヤーセクション</h1>
+                <!-- ご提供のテキストを挿入 -->
+                <article id="template-char">
+                    <h2>2.1 テンプレートキャラクター</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="create-char">
+                    <h2>2.2 キャラクターの創造</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="trpg-part">
+                    <h2>2.3 TRPGパート：冒険と交渉</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="slg-part">
+                    <h2>2.4 経営SLGパート：富と名声の獲得</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+            </section>
+
+            <!-- テラーセクション -->
+            <section id="teller-section">
+                <h1>3 テラーセクション</h1>
+                 <!-- ご提供のテキストを挿入 -->
+                <article id="teller-prepare">
+                    <h2>3.1 セッションの準備</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                 <article id="teller-npc">
+                    <h2>3.2 世界を彩る人々（NPC）</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                 <article id="teller-manage">
+                    <h2>3.3 TRPGパートの進行管理</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                 <article id="teller-enemy">
+                    <h2>3.4 プレイヤーの前に立ちはだかるもの</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+            </section>
+
+            <!-- シナリオセクション -->
+            <section id="scenario-section">
+                <h1>4 シナリオセクション</h1>
+                <article id="scenario-sample">
+                    <h2>4.1 サンプルシナリオ『暁のキャラバン』</h2>
+                     <!-- ご提供のテキストを挿入 -->
+                </article>
+            </section>
+
+            <!-- データセクション -->
+            <section id="data-section">
+                <h1>5 データセクション</h1>
+                <!-- ご提供のテキストを挿入 -->
+                <article id="class-list">
+                    <h2>5.1 クラス一覧</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="skill-list">
+                    <h2>5.2 スキル一覧</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="jigyo-list">
+                    <h2>5.3 事業一覧</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="event-list">
+                    <h2>5.4 イベント一覧</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+                <article id="glossary">
+                    <h2>5.5 用語集</h2>
+                    <!-- ご提供のテキストを挿入 -->
+                </article>
+            </section>
+        </main>
+    </div>
+
+    <footer>
+        <p>&copy; 2025 ベンチャー of テイルズ TRPG(仮) 制作チーム</p>
+    </footer>
+</body>
+</html>

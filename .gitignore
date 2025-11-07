@@ -1,4 +1,8 @@
+# 絶対にGitに追加したくないファイルやフォルダ
 .env
 discord-bot-476315-308cfda1862a.json
 deploy.ps1
+# スラッシュコマンドをDiscordに登録するスクリプト
 deploy-commands.js
+# 全てのMarkdownファイルを無視
+*.md

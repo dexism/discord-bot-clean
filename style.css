@@ -1,0 +1,205 @@
+/* 基本設定とカラーパレット */
+:root {
+    /* ライトモード */
+    --primary-color: #0d47a1; /* 深い青 */
+    --secondary-color: #1565c0; /* やや明るい青 */
+    --background-color: #f5f5f5; /* 明るいグレー */
+    --surface-color: #ffffff; /* 白 */
+    --text-color: #212121; /* 黒に近いグレー */
+    --border-color: #e0e0e0; /* 薄いグレー */
+    --quote-bg-color: #e3f2fd; /* 薄い青 */
+    --code-bg-color: #eeeeee;
+    --link-color: #1976d2;
+    --teller-info-bg: #fffde7; /* テラー情報用の背景色 */
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        /* ダークモード */
+        --primary-color: #42a5f5; /* 明るい青 */
+        --secondary-color: #1e88e5;
+        --background-color: #121212; /* 真っ黒ではない黒 */
+        --surface-color: #1e1e1e; /* やや明るい黒 */
+        --text-color: #e0e0e0; /* 明るいグレー */
+        --border-color: #424242; /* 暗いグレー */
+        --quote-bg-color: #1a2a3a;
+        --code-bg-color: #2c2c2c;
+        --link-color: #64b5f6;
+        --teller-info-bg: #3a3a2a;
+    }
+}
+
+/* 全体スタイル */
+html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 2rem;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+    line-height: 1.8;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    margin: 0;
+}
+
+h1, h2, h3, h4 {
+    color: var(--primary-color);
+    border-left: 5px solid var(--primary-color);
+    padding-left: 1rem;
+    line-height: 1.4;
+}
+
+h1 { font-size: 2.2em; margin-top: 2em; }
+h2 { font-size: 1.8em; margin-top: 1.8em; border-left-width: 4px; }
+h3 { font-size: 1.4em; margin-top: 1.5em; border-left-width: 3px; }
+h4 { font-size: 1.2em; }
+
+a {
+    color: var(--link-color);
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
+}
+
+/* ヘッダー */
+header {
+    background: var(--primary-color);
+    color: white;
+    text-align: center;
+    padding: 2rem 1rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+header h1 {
+    margin: 0;
+    border: none;
+    color: white;
+    padding: 0;
+    font-size: 2.5rem;
+}
+header h2 {
+    margin: 0.2rem 0;
+    font-weight: normal;
+    border: none;
+    padding: 0;
+    color: white;
+    font-size: 1.5rem;
+}
+header .sub-title {
+    font-style: italic;
+    opacity: 0.9;
+}
+
+/* メインレイアウト */
+.container {
+    display: flex;
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+main {
+    flex-grow: 1;
+    background-color: var(--surface-color);
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* サイドバー（目次） */
+.sidebar {
+    flex: 0 0 250px;
+    margin-right: 2rem;
+    position: sticky;
+    top: 2rem;
+    align-self: flex-start;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+}
+.sidebar h3 {
+    margin-top: 0;
+}
+.sidebar ul {
+    list-style: none;
+    padding: 0;
+}
+.sidebar ul ul {
+    padding-left: 1.5rem;
+    font-size: 0.9em;
+}
+.sidebar summary {
+    cursor: pointer;
+    font-weight: bold;
+}
+.sidebar details[open] summary {
+    color: var(--primary-color);
+}
+.sidebar a {
+    display: block;
+    padding: 0.4rem 0;
+    transition: color 0.2s;
+}
+
+/* 各種コンポーネント */
+blockquote {
+    border-left: 3px solid var(--secondary-color);
+    padding: 1rem 1.5rem;
+    margin: 1.5rem 0;
+    background-color: var(--quote-bg-color);
+    border-radius: 4px;
+    font-style: italic;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5rem 0;
+}
+th, td {
+    border: 1px solid var(--border-color);
+    padding: 0.8rem;
+    text-align: left;
+}
+th {
+    background-color: var(--background-color);
+}
+
+.comment-box, .gm-name-box {
+    background-color: var(--code-bg-color);
+    border: 1px solid var(--border-color);
+    padding: 1rem 1.5rem;
+    margin: 1.5rem 0;
+    border-radius: 4px;
+}
+.comment-box h4, .gm-name-box h3 {
+    margin-top: 0;
+}
+
+.replay-dialogue .teller {
+    color: var(--primary-color);
+    font-weight: bold;
+}
+.replay-dialogue .player {
+    color: var(--secondary-color);
+    font-weight: bold;
+}
+
+/* モバイル対応 */
+@media (max-width: 768px) {
+    .container {
+        flex-direction: column;
+    }
+    .sidebar {
+        position: static;
+        flex: 1 1 auto;
+        margin-right: 0;
+        margin-bottom: 2rem;
+        max-height: none;
+    }
+    main {
+        padding: 1rem;
+    }
+    h1 { font-size: 1.8em; }
+    h2 { font-size: 1.5em; }
+}
