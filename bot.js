@@ -230,7 +230,7 @@ You MUST respond in JAPANESE.
         const persona = { parts: [{ text: personaText }] };
         const request = {
             // model: 'gemini-2.5-flash-lite',
-            model: 'gemini-1.5-flash',
+            model: 'gemini-1.5-flash-002',
             contents: channelHistory.contents,
             systemInstruction: persona
         };
