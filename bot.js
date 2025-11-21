@@ -10,7 +10,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.8.5';
+const BOT_VERSION = 'v3.8.6';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 const GUILD_MASTER_NAME = 'ギルドマスター';
@@ -229,7 +229,8 @@ You MUST respond in JAPANESE.
         
         const persona = { parts: [{ text: personaText }] };
         const request = {
-            model: 'gemini-2.5-flash-lite',
+            // model: 'gemini-2.5-flash-lite',
+            model: 'gemini-robotics-er-1.5-001',
             contents: channelHistory.contents,
             systemInstruction: persona
         };
