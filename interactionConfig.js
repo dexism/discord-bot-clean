@@ -50,19 +50,27 @@ const generateDynamicMenu = (menuPageData) => {
         const rowIndex = btn.row || 1;
         if (!rows[rowIndex]) rows[rowIndex] = new ActionRowBuilder();
 
-        let customId = '';
-        if (btn.actionType === 'NAVIGATE') {
+        if (btn.actionType === 'LINK') {
+            // LINKボタンは customId を持たず、URLを持つ
+            customId = null;
+        } else if (btn.actionType === 'NAVIGATE') {
             customId = `menu_nav_${btn.target}`;
         } else {
             // PROCESS or EXIT
             customId = `menu_process_${btn.target}`;
         }
 
-        const buttonStyle = ButtonStyle[btn.style] || ButtonStyle.Primary;
+        const buttonStyle = btn.actionType === 'LINK' ? ButtonStyle.Link : (ButtonStyle[btn.style] || ButtonStyle.Primary);
 
-        rows[rowIndex].addComponents(
-            createButton(customId, btn.label, buttonStyle)
-        );
+        let buttonComponent = new ButtonBuilder().setLabel(btn.label).setStyle(buttonStyle);
+
+        if (btn.actionType === 'LINK') {
+            buttonComponent.setURL(btn.target);
+        } else {
+            buttonComponent.setCustomId(customId);
+        }
+
+        rows[rowIndex].addComponents(buttonComponent);
     });
 
     // 行番号順にソートして配列化

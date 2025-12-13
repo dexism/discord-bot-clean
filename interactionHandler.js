@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { classDetails, menuConfig, generateDynamicMenu } = require('./interactionConfig');
 const { logUserAction, loadMenuData } = require('./sheetClient');
 
@@ -42,8 +42,17 @@ async function handleInteraction(interaction, context) {
                     // テンプレート変数の置換
                     const description = mainPage.descriptionTemplate.replace('{{UserName}}', interaction.user.displayName);
 
+                    const embed = new EmbedBuilder()
+                        .setDescription(description)
+                        .setColor(mainPage.embedColor || '#0099ff');
+
+                    if (mainPage.title) embed.setTitle(mainPage.title);
+                    if (mainPage.imageURL) embed.setImage(mainPage.imageURL);
+                    if (mainPage.thumbnailURL) embed.setThumbnail(mainPage.thumbnailURL);
+
                     await interaction.editReply({
-                        content: description,
+                        content: '', // Embed利用時は空に
+                        embeds: [embed],
                         components: components
                     });
                 } else {
@@ -106,8 +115,17 @@ async function handleDynamicNavigation(interaction, targetPageId, updateHistoryC
     const components = generateDynamicMenu(targetPage);
     const description = targetPage.descriptionTemplate.replace('{{UserName}}', interaction.user.displayName);
 
+    const embed = new EmbedBuilder()
+        .setDescription(description)
+        .setColor(targetPage.embedColor || '#0099ff');
+
+    if (targetPage.title) embed.setTitle(targetPage.title);
+    if (targetPage.imageURL) embed.setImage(targetPage.imageURL);
+    if (targetPage.thumbnailURL) embed.setThumbnail(targetPage.thumbnailURL);
+
     await interaction.update({
-        content: description,
+        content: '',
+        embeds: [embed],
         components: components
     });
 }

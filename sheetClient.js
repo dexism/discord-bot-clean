@@ -182,18 +182,19 @@ async function loadMenuData() {
         // シートが無い場合は作成してテンプレートを入れる（初回用）
         if (!menuSheet) {
             console.log('[Menu Loader] Creating MENU_DEF sheet...');
-            menuSheet = await doc.addSheet({
-                headerValues: ['PageID', 'Title', 'DescriptionTemplate', 'ButtonLabel', 'ButtonStyle', 'ActionType', 'Target', 'Row'],
-                title: 'MENU_DEF'
+            menuSheet = await doc.addSheet({ 
+                headerValues: ['PageID', 'Title', 'DescriptionTemplate', 'ButtonLabel', 'ButtonStyle', 'ActionType', 'Target', 'Row', 'ImageURL', 'ThumbnailURL', 'EmbedColor'],
+                title: 'MENU_DEF' 
             });
             // 初期データ投入
             await menuSheet.addRows([
-                { PageID: 'main', Title: 'メインメニュー', DescriptionTemplate: 'おかえりなさい {{UserName}} さん！\n今日は何をしますか？', ButtonLabel: 'キャラクター登録', ButtonStyle: 'Success', ActionType: 'PROCESS', Target: 'register', Row: 1 },
+                { PageID: 'main', Title: 'メインメニュー', DescriptionTemplate: 'おかえりなさい {{UserName}} さん！\n今日は何をしますか？', ButtonLabel: 'キャラクター登録', ButtonStyle: 'Success', ActionType: 'PROCESS', Target: 'register', Row: 1, EmbedColor: '#00AAFF' },
                 { PageID: 'main', Title: 'メインメニュー', DescriptionTemplate: 'おかえりなさい {{UserName}} さん！\n今日は何をしますか？', ButtonLabel: 'ステータス', ButtonStyle: 'Primary', ActionType: 'PROCESS', Target: 'status', Row: 1 },
                 { PageID: 'main', Title: 'メインメニュー', DescriptionTemplate: 'おかえりなさい {{UserName}} さん！\n今日は何をしますか？', ButtonLabel: '持ち物', ButtonStyle: 'Primary', ActionType: 'PROCESS', Target: 'inventory', Row: 1 },
                 { PageID: 'main', Title: 'メインメニュー', DescriptionTemplate: 'おかえりなさい {{UserName}} さん！\n今日は何をしますか？', ButtonLabel: 'ギルド', ButtonStyle: 'Primary', ActionType: 'NAVIGATE', Target: 'guild', Row: 2 },
+                { PageID: 'main', Title: 'メインメニュー', DescriptionTemplate: 'おかえりなさい {{UserName}} さん！\n今日は何をしますか？', ButtonLabel: 'ヘルプ', ButtonStyle: 'Link', ActionType: 'LINK', Target: 'https://discord.com', Row: 3 },
                 { PageID: 'main', Title: 'メインメニュー', DescriptionTemplate: 'おかえりなさい {{UserName}} さん！\n今日は何をしますか？', ButtonLabel: '終了', ButtonStyle: 'Secondary', ActionType: 'PROCESS', Target: 'leave', Row: 3 },
-                { PageID: 'guild', Title: 'ギルド', DescriptionTemplate: 'いらっしゃい {{UserName}} さん！\n何かお手伝いしましょうか？', ButtonLabel: '相場情報', ButtonStyle: 'Primary', ActionType: 'PROCESS', Target: 'market', Row: 1 },
+                { PageID: 'guild', Title: 'ギルド', DescriptionTemplate: 'いらっしゃい {{UserName}} さん！\n何かお手伝いしましょうか？', ButtonLabel: '相場情報', ButtonStyle: 'Primary', ActionType: 'PROCESS', Target: 'market', Row: 1, EmbedColor: '#FFAA00' },
                 { PageID: 'guild', Title: 'ギルド', DescriptionTemplate: 'いらっしゃい {{UserName}} さん！\n何かお手伝いしましょうか？', ButtonLabel: '依頼掲示板', ButtonStyle: 'Primary', ActionType: 'PROCESS', Target: 'board', Row: 1 },
                 { PageID: 'guild', Title: 'ギルド', DescriptionTemplate: 'いらっしゃい {{UserName}} さん！\n何かお手伝いしましょうか？', ButtonLabel: '買い物', ButtonStyle: 'Primary', ActionType: 'PROCESS', Target: 'shop', Row: 2 },
                 { PageID: 'guild', Title: 'ギルド', DescriptionTemplate: 'いらっしゃい {{UserName}} さん！\n何かお手伝いしましょうか？', ButtonLabel: '買取りカウンター', ButtonStyle: 'Primary', ActionType: 'PROCESS', Target: 'sell', Row: 2 },
@@ -213,7 +214,11 @@ async function loadMenuData() {
 
             if (!menuMap[pageId]) {
                 menuMap[pageId] = {
+                    title: row.get('Title') || '',
                     descriptionTemplate: row.get('DescriptionTemplate') || '',
+                    imageURL: row.get('ImageURL') || '',
+                    thumbnailURL: row.get('ThumbnailURL') || '',
+                    embedColor: row.get('EmbedColor') || '',
                     buttons: []
                 };
             }
