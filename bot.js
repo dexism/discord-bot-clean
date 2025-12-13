@@ -8,6 +8,23 @@ const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle,
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
+const { handleInteraction } = require('./interactionHandler');
+const { initSheet, loadPersonaText, loadAndFormatAllDataForAI } = require('./sheetClient');
+
+// ---------------------------------------------------------------------------------
+// 概要:
+// Discordボット「ノエル」のメインスクリプト。
+// Discord.js を使用して Discord と対話し、Google Gemini API を使用して自然言語応答を生成します。
+// Google Sheets をデータベースとして使用し、キャラクターの記憶や知識を管理します。
+// ---------------------------------------------------------------------------------
+
+// --- ライブラリのセットアップ ---
+// dotenv: 環境変数（.env）の読み込み
+// @google/genai: Google Gemini AI API のクライアント
+// discord.js: Discord API ライブラリ
+// google-spreadsheet: Google Sheets 操作用ライブラリ
+// google-auth-library: Google API 認証用 (JWT)
+// express: サーバーの常時稼働（Render等のスリープ回避）用Webサーバー
 
 // --- ボットの基本設定 ---
 const BOT_VERSION = 'v3.8.6';
@@ -21,119 +38,26 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
-const SPREADSHEET_ID = '1ZnpNdPhm_Q0IYgZAVFQa5Fls7vjLByGb3nVqwSRgBaw';
-const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
-
 // --- Googleスプレッドシート連携関数 ---
-async function loadPersonaText() {
-    try {
-        const serviceAccountAuth = new JWT({
-            email: creds.client_email,
-            key: creds.private_key,
-            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-        });
-        const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
-        await doc.loadInfo();
-        const personaSheet = doc.sheetsByTitle['PERSONA'];
-        if (!personaSheet) {
-            console.warn('[Persona Loader] Sheet "PERSONA" not found. Using default persona.');
-            return null;
-        }
-        const rows = await personaSheet.getRows();
-        const headers = personaSheet.headerValues;
-        const personaLines = [];
-        for (const row of rows) {
-            const isEnabled = row.get(headers[0]);
-            if (isEnabled === true || isEnabled === 'TRUE') {
-                const text = row.get(headers[1]);
-                if (text) personaLines.push(text);
-            }
-        }
-        console.log(`[Persona Loader] Successfully loaded ${personaLines.length} persona lines.`);
-        return personaLines.join('\n');
-    } catch (error) {
-        console.error("Error loading persona from Google Sheets:", error);
-        return null;
-    }
-}
-
-async function loadAndFormatAllDataForAI() {
-    try {
-        const serviceAccountAuth = new JWT({
-            email: creds.client_email,
-            key: creds.private_key,
-            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-        });
-        const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
-        await doc.loadInfo();
-        console.log("Successfully connected to Google Sheet document.");
-        const initialHistoryWithDirectives = [];
-        for (const sheet of doc.sheetsByIndex) {
-            if (sheet.title === 'PERSONA') {
-                console.log(`[Loader] Skipping special sheet: "${sheet.title}"`);
-                continue;
-            }
-            console.log(`[Loader] Processing sheet: "${sheet.title}"`);
-            await sheet.loadCells('A1:C1');
-            const sheetEnabledValue = sheet.getCell(0, 0).value;
-            if (sheetEnabledValue !== true && sheetEnabledValue !== 'TRUE') {
-                console.log(`[Loader] Sheet "${sheet.title}" is disabled. Skipping.`);
-                continue;
-            }
-            const userName = sheet.getCell(0, 1).value || GUILD_MASTER_NAME;
-            const userMessageTemplate = sheet.getCell(0, 2).value;
-            if (!userMessageTemplate) {
-                console.warn(`[Loader] Sheet "${sheet.title}" is enabled but has no message template in C1. Skipping.`);
-                continue;
-            }
-            const rows = await sheet.getRows();
-            const headers = sheet.headerValues;
-            const knowledgeLines = [];
-            for (const row of rows) {
-                const rowEnabledValue = row.get(headers[0]);
-                if (rowEnabledValue !== true && rowEnabledValue !== 'TRUE') continue;
-                const dataParts = [];
-                for (let i = 1; i < headers.length; i++) {
-                    const header = headers[i];
-                    if (!header) continue;
-                    const value = row.get(header);
-                    if (value !== null && value !== undefined && value !== '') dataParts.push({ header, value });
-                }
-                if (dataParts.length === 0) continue;
-                let line = "";
-                if (dataParts.length === 1) {
-                    line = `${dataParts[0].value}`;
-                } else {
-                    const lastPart = dataParts[dataParts.length - 1];
-                    const headPartsRaw = dataParts.slice(0, dataParts.length - 1);
-                    const headPartsFormatted = headPartsRaw.map(part => `${part.header}「${part.value}」`);
-                    line = `${headPartsFormatted.join('の')}は、${lastPart.value}`;
-                }
-                knowledgeLines.push(line);
-            }
-            if (knowledgeLines.length > 0) {
-                const knowledgeText = knowledgeLines.join('\n');
-                const userMessage = userMessageTemplate + '\n' + knowledgeText;
-                initialHistoryWithDirectives.push(
-                    { role: 'user', parts: [{ text: `User "${userName}": "${userMessage}"` }] },
-                    { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "はい、${userName}！全て承知いたしました！"` }] }
-                );
-                console.log(`[Loader] Successfully loaded ${knowledgeLines.length} records from "${sheet.title}".`);
-            }
-        }
-        console.log(`[Loader] Finished loading all data. Generated ${initialHistoryWithDirectives.length / 2} sets of memories.`);
-        return initialHistoryWithDirectives;
-    } catch (error) {
-        console.error("Error loading game data from Google Sheets:", error);
-        return null;
-    }
-}
+// (sheetClient.js に移動済み)
 
 // --- グローバル変数 ---
+// channelHistories: 各チャンネルごとの会話履歴をキャッシュするMap。
+// Key: ChannelID, Value: { contents: メッセージ配列, lastTimestamp: 最終更新時刻 }
+// 1時間が経過すると履歴はリセットされます（HISTORY_TIMEOUT）。
 const channelHistories = new Map();
+
+// channelParticipants: 各チャンネルで最近発言したユーザーを追跡するMap。
+// 返信確率の計算（人数が多いほど返信率を下げるなど）に使用されます。
 const channelParticipants = new Map();
 
 // --- ヘルパー関数 ---
+
+/**
+ * ダイスコマンド（例: !2d6）を解析します。
+ * @param {string} input ユーザーのメッセージ
+ * @returns {{count: number, sides: number}|null} 解析結果、または非コマンドならnull
+ */
 const parseDiceCommand = (input) => {
     const match = input.match(/^!(\d+)d(\d+)$/i);
     if (!match) return null;
@@ -148,11 +72,25 @@ const rollDice = (count, sides) => {
 };
 
 // --- Bot起動時処理 ---
-client.once('clientReady', () => {
+client.once('clientReady', async () => {
     console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
+    await initSheet();
 });
 
 // --- メッセージ受信時処理 ---
+/**
+ * Discord上のメッセージを受信した際のメインイベントハンドラ。
+ * 
+ * 処理フロー:
+ * 1. Bot自身の発言は無視。
+ * 2. '!' で始まる場合はダイスコマンドとして処理。
+ * 3. 発言者を「参加者リスト」に登録・更新（直近の発言頻度からアクティブ人数を推定）。
+ * 4. Botへのメンション、または名前（ノエル）が含まれるかチェック。
+ * 5. スプレッドシートから最新の人格と知識データをロード（都度ロードによりスプシ更新が即反映）。
+ * 6. チャンネルごとの会話履歴（コンテキスト）を構築・更新。
+ * 7. Gemini API にリクエストを送信し、応答を生成。
+ * 8. 応答確率（アクティブ人数に応じたランダム要素）または指名（メンション）に基づき、Discordに返信するか決定。
+ */
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
     const command = message.content.trim();
@@ -193,7 +131,7 @@ client.on('messageCreate', async message => {
         console.log(`[Participant Logic] Active participants: ${participantCount}`);
 
         const isAddressedToNoelle = message.content.includes(BOT_PERSONA_NAME) || message.mentions.has(client.user);
-        
+
         const loadedPersonaText = await loadPersonaText();
         const initialHistoryFromSheets = await loadAndFormatAllDataForAI();
 
@@ -201,13 +139,13 @@ client.on('messageCreate', async message => {
             message.reply('ごめんなさい、ギルドの台帳が今見つからないみたい……');
             return;
         }
-        
+
         let channelHistory = channelHistories.get(channelId);
 
         if (!channelHistory || (now - channelHistory.lastTimestamp > HISTORY_TIMEOUT)) {
-            channelHistory = { 
-                contents: JSON.parse(JSON.stringify(initialHistoryFromSheets)), 
-                lastTimestamp: now 
+            channelHistory = {
+                contents: JSON.parse(JSON.stringify(initialHistoryFromSheets)),
+                lastTimestamp: now
             };
             channelHistories.set(channelId, channelHistory);
         }
@@ -215,7 +153,7 @@ client.on('messageCreate', async message => {
         const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
-        
+
         let personaText = loadedPersonaText;
         if (!personaText) {
             personaText = `
@@ -226,15 +164,21 @@ Your task is to continue the conversation naturally as your character.
 You MUST respond in JAPANESE.
 `;
         }
-        
+
         const persona = { parts: [{ text: personaText }] };
+        // Gemini API へのリクエストオブジェクトの構築
         const request = {
+            // 使用モデル: 軽量かつ高速な gemini-2.5-flash-lite を採用
             model: 'gemini-2.5-flash-lite',
-            // model: 'gemini-1.5-flash-001',
-            contents: channelHistory.contents,
-            systemInstruction: persona
+            // model: 'gemini-1.5-flash-001', // 旧モデル（バックアップ用）
+            contents: channelHistory.contents, // 会話履歴（知識データ含む）
+            systemInstruction: persona // システムプロンプト（人格定義）
         };
-        
+
+        /**
+         * Gemini API をリトライ付きで呼び出す内部関数。
+         * レート制限（429エラー）時に、指数関数的バックオフ（1s, 2s, 4s...）で待機して再試行します。
+         */
         const generateContentWithRetry = async (request, maxRetries = 5) => {
             let lastError = null;
             for (let i = 0; i < maxRetries; i++) {
@@ -255,15 +199,17 @@ You MUST respond in JAPANESE.
 
         const response = await generateContentWithRetry(request);
         const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || '[IGNORE]';
-        
+
         if (reply.includes('[IGNORE]')) {
             console.log('[Participant Logic] AI decided to ignore.');
-            return; 
+            return;
         }
 
         if (isAddressedToNoelle) {
             console.log('[Participant Logic] Addressed to Noelle. Replying.');
         } else {
+            // 話しかけられていない場合は、アクティブ参加者数に応じた確率で返信する。
+            // 参加者が多いほど、Botが割り込む頻度を下げる（1/参加者数）。
             const replyProbability = 1 / (participantCount || 1);
             if (Math.random() > replyProbability) {
                 console.log(`[Participant Logic] Not replying due to probability check (${replyProbability.toFixed(2)}).`);
@@ -271,17 +217,17 @@ You MUST respond in JAPANESE.
             }
             console.log(`[Participant Logic] Replying based on probability (${replyProbability.toFixed(2)}).`);
         }
-        
+
         let finalReply = reply.trim();
         const match = finalReply.match(/^(?:"?ノエル"?:\s*)?"?(.*?)"?$/);
         if (match && match[1]) {
             finalReply = match[1].trim();
         }
-        
+
         message.reply(finalReply);
         channelHistory.contents.push({ role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${finalReply}"` }] });
         channelHistory.lastTimestamp = now;
-        
+
     } catch (error) {
         console.error('Error in messageCreate:', error);
         message.reply('あ、すみません……ちょっと考えごとをしてました！');
@@ -289,166 +235,33 @@ You MUST respond in JAPANESE.
 });
 
 // --- インタラクション（コマンド・ボタン）受信時処理 ---
-const classDetails = {
-    merchant: { 
-        name: '商人', 
-        description: "## **商人**\n交渉力と市場感覚に優れ、原価を徹底的に削ることで利益を最大化する**合理的経営者**。信用を重んじ、実利を追求します。" 
-    },
-    artisan: { 
-        name: '職人', 
-        description: "## **職人**\n技術力と創造力に秀でた職人。展示会で名声を高め、唯一無二のブランドを築きます。**芸術と品質を両立する匠**です。" 
-    },
-    leader: { 
-        name: 'リーダー', 
-        description: "## **リーダー**\n地域との絆を活かし、専属契約や地元資源の活用に長けた**統率者**。信用度が非常に高く、地元民からの信頼も厚いのが特徴です。" 
-    },
-    engineer: { 
-        name: 'エンジニア', 
-        description: "## **エンジニア**\n技術力と創造力が突出した研究者。新素材や魔道具の融合で産業革命を起こす可能性を秘めた**挑戦者**です。" 
-    },
-    magnate: { 
-        name: 'マグナート', 
-        description: "## **マグナート**\n複数事業を同時に展開する**経済貴族**。組織適応力と市場感覚に優れ、雇用・育成・投資に長けています。" 
-    },
-    trader: { 
-        name: 'トレーダー', 
-        description: "## **トレーダー**\n交渉力と市場感覚に長け、為替や関税を操る**交易の達人**。国際的な信頼を築き、外交と経済の架け橋となります。" 
-    },
-};
-
+// Slashコマンドおよびボタン操作のイベントハンドラを外部モジュールに委譲
 client.on('interactionCreate', async interaction => {
-    if (interaction.isChatInputCommand()) {
-        const { commandName } = interaction;
-        try {
-            // ★★★★★【修正】全てのコマンドで、最初に deferReply を実行する ★★★★★
-            if (commandName === 'ping' || commandName === 'ver' || commandName === 'menu') {
-                // menuコマンドはボタンが表示されるので、ephemeralではない通常の応答をdeferする
-                await interaction.deferReply({ ephemeral: commandName !== 'menu' });
-            }
+    // 履歴更新用コールバック
+    // handleInteraction 内でユーザーのアクションが確定した際に呼び出される
+    const updateHistoryCallback = (interaction, userActionText, replyText) => {
+        updateInteractionHistory(interaction, userActionText, replyText);
+    };
 
-            if (commandName === 'ping') {
-                await interaction.editReply('Pong!');
-            }
-            else if (commandName === 'ver') {
-                await interaction.editReply(`現在の私のバージョンは ${BOT_VERSION} です`);
-            }
-            else if (commandName === 'menu') {
-                const row = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder().setCustomId('menu_register').setLabel('キャラクターを登録する').setStyle(ButtonStyle.Success),
-                        new ButtonBuilder().setCustomId('menu_status').setLabel('ステータスを確認する').setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('menu_board').setLabel('依頼掲示板を見る').setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('menu_leave').setLabel('帰る').setStyle(ButtonStyle.Secondary)
-                    );
-                await interaction.editReply({ content: 'いらっしゃいませ！なにをお望みですか？', components: [row] });
-            }
-        } catch(error) {
-            console.error(`Error handling slash command ${commandName}:`, error);
-        }
-        return;
-    }
+    const context = {
+        botVersion: BOT_VERSION,
+        updateHistoryCallback: updateHistoryCallback
+    };
 
-    if (interaction.isButton()) {
-        const [action, subAction, subject] = interaction.customId.split('_');
-        try {
-            if (action === 'menu') await handleMainMenu(interaction);
-            else if (action === 'class') await handleClassMenu(interaction);
-        } catch (error) {
-            console.error('Error in button interaction:', error);
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: 'すみません、エラーが発生しました。', ephemeral: true }).catch(() => {});
-            } else {
-                await interaction.editReply({ content: 'すみません、エラーが発生しました。', components: [] }).catch(() => {});
-            }
-        }
-    }
+    await handleInteraction(interaction, context);
 });
 
-async function handleMainMenu(interaction) {
-    const { customId } = interaction;
-    if (customId === 'menu_register') {
-        await interaction.update(getClassListComponents());
-        return;
-    }
-    if (customId === 'menu_return') {
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder().setCustomId('menu_register').setLabel('キャラクターを登録する').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('menu_status').setLabel('ステータスを確認する').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('menu_board').setLabel('依頼掲示板を見る').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('menu_leave').setLabel('帰る').setStyle(ButtonStyle.Secondary)
-            );
-        await interaction.update({ content: 'いらっしゃいませ！なにをお望みですか？', components: [row] });
-        return;
-    }
-    await interaction.deferReply({ ephemeral: true });
-    let userActionText = '', replyText = '';
-    switch (customId) {
-        case 'menu_status': userActionText = '「ステータスを確認する」を選んだ'; replyText = 'はい、ステータスの確認ですね。承知いたしました。（以降の処理は未実装です）'; break;
-        case 'menu_board': userActionText = '「依頼掲示板を見る」を選んだ'; replyText = 'はい、こちらが依頼掲示板です。（以降の処理は未実装です）'; break;
-        case 'menu_leave': userActionText = '「帰る」を選んだ'; replyText = '承知いたしました。またお越しくださいませ。'; break;
-        default: await interaction.deleteReply(); return;
-    }
-    await interaction.editReply({ content: replyText });
-    updateInteractionHistory(interaction, userActionText, replyText);
-    const originalMessage = interaction.message;
-    const disabledRow = ActionRowBuilder.from(originalMessage.components[0]);
-    disabledRow.components.forEach(component => component.setDisabled(true));
-    await originalMessage.edit({ components: [disabledRow] });
-}
 
-async function handleClassMenu(interaction) {
-    const [action, subAction, subject] = interaction.customId.split('_');
-    if (subAction === 'return' && subject === 'list') {
-        await interaction.update(getClassListComponents());
-        return;
-    }
-    if (subAction === 'details') {
-        const classInfo = classDetails[subject];
-        if (!classInfo) return;
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`class_select_${subject}`).setLabel(`${classInfo.name}を選択する`).setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('class_return_list').setLabel('選択メニューに戻る').setStyle(ButtonStyle.Secondary)
-        );
-        await interaction.update({ content: classInfo.description, components: [row] });
-        return;
-    }
-    if (subAction === 'select') {
-        await interaction.deferReply({ ephemeral: true });
-        const classInfo = classDetails[subject];
-        if (!classInfo) return;
-        const userActionText = `クラスとして「${classInfo.name}」を最終選択した`;
-        const replyText = `はい、あなたのクラスは「${classInfo.name}」に決定しました。ようこそ！（以降の処理は未実装です）`;
-        await interaction.editReply({ content: replyText });
-        updateInteractionHistory(interaction, userActionText, replyText);
-        const originalMessage = interaction.message;
-        const disabledComponents = originalMessage.components.map(row => {
-            const newRow = ActionRowBuilder.from(row);
-            newRow.components.forEach(component => component.setDisabled(true));
-            return newRow;
-        });
-        await originalMessage.edit({ components: disabledComponents });
-    }
-}
 
-function getClassListComponents() {
-    const content = "## **キャラクタークラス選択**\nあなたの経営者としての第一歩は、いずれかの「プライムクラス」から始まります。\nプライムクラスは、健全で信頼される経営スタイルを体現する存在です。\nあなたの選択は、今後の戦略・人脈・評判・そして“闇”への可能性をも左右します。\n\n**詳しく知りたいクラスを選択してください。**";
-    const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('class_details_merchant').setLabel('商人について詳しく聞く').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('class_details_artisan').setLabel('職人について詳しく聞く').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('class_details_leader').setLabel('リーダーについて詳しく聞く').setStyle(ButtonStyle.Primary),
-    );
-    const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('class_details_engineer').setLabel('エンジニアについて詳しく聞く').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('class_details_magnate').setLabel('マグナートについて詳しく聞く').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('class_details_trader').setLabel('トレーダーについて詳しく聞く').setStyle(ButtonStyle.Primary),
-    );
-    const row3 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('menu_return').setLabel('メインメニューに戻る').setStyle(ButtonStyle.Secondary)
-    );
-    return { content, components: [row1, row2, row3] };
-}
 
+
+/**
+ * インタラクション（ボタン操作など）の結果を会話履歴に注入する関数。
+ * 
+ * 重要: ボタン操作等は通常のチャットログに残らないため、そのままではAIが文脈を理解できません。
+ * この関数で「ユーザーが〇〇を選択した」「システムが〇〇と応答した」という情報を
+ * 擬似的に会話履歴（channelHistories）に追加することで、AIが直前の操作を踏まえた会話を継続できるようにします。
+ */
 function updateInteractionHistory(interaction, userActionText, replyText) {
     const channelId = interaction.channel.id;
     let channelHistory = channelHistories.get(channelId);
@@ -473,8 +286,8 @@ client.login(process.env.DISCORD_TOKEN);
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
-    res.send(`Hello! I am ${BOT_PERSONA_NAME}, Bot version ${BOT_VERSION}. I am awake!`); 
+    res.send(`Hello! I am ${BOT_PERSONA_NAME}, Bot version ${BOT_VERSION}. I am awake!`);
 });
-app.listen(port, () => { 
-    console.log(`Fake server is running on port ${port} to prevent sleep.`); 
+app.listen(port, () => {
+    console.log(`Fake server is running on port ${port} to prevent sleep.`);
 });
