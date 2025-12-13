@@ -47,8 +47,7 @@ async function handleInteraction(interaction, context) {
                     // 画像用Embed（上部）
                     if (mainPage.imageURL) {
                         const imageEmbed = new EmbedBuilder()
-                            .setImage(mainPage.imageURL)
-                            .setColor(mainPage.embedColor || '#0099ff');
+                            .setImage(mainPage.imageURL);
                         embeds.push(imageEmbed);
                     }
 
@@ -132,8 +131,7 @@ async function handleDynamicNavigation(interaction, targetPageId, updateHistoryC
     // 画像用Embed（上部）
     if (targetPage.imageURL) {
         const imageEmbed = new EmbedBuilder()
-            .setImage(targetPage.imageURL)
-            .setColor(targetPage.embedColor || '#0099ff');
+            .setImage(targetPage.imageURL);
         embeds.push(imageEmbed);
     }
 
