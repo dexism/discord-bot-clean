@@ -6,3 +6,5 @@ deploy.ps1
 deploy-commands.js
 # 全てのMarkdownファイルを無視
 *.md
+
+LICENSE

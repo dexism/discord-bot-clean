@@ -8,6 +8,9 @@ const { logUserAction, loadMenuData } = require('./sheetClient');
 // あるいはここでインポート済みの定数を使う。
 // ※ bot.js の BOT_VERSION と同期させるため、handleInteraction の context に version を含める設計にします。
 
+// パスコード入力状態管理 { userId: "1234" }
+const passcodeStates = new Map();
+
 /**
  * インタラクションを一括処理するメインハンドラ
  * @param {Interaction} interaction - Discord Interaction Object
@@ -98,6 +101,10 @@ async function handleInteraction(interaction, context) {
             }
             else if (action === 'class') {
                 await handleClassMenu(interaction, subAction, subject, updateHistoryCallback);
+            }
+            else if (action === 'pass') {
+                // pass_0, pass_back, pass_enter など
+                await handlePasscodeInteraction(interaction, subAction, updateHistoryCallback);
             }
         } catch (error) {
             console.error('Error in button interaction:', error);
@@ -193,6 +200,23 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
         case 'board': userActionText = '「依頼掲示板」を選んだ'; replyText = '掲示板を確認します。（未実装）'; break;
         case 'shop': userActionText = '「買い物」を選んだ'; replyText = '何を買いますか？（未実装）'; break;
         case 'sell': userActionText = '「買取り」を選んだ'; replyText = '何を売却しますか？（未実装）'; break;
+        case 'inputPass':
+            // パスコード入力開始
+            userActionText = '「パスコード入力」を開始した';
+            // 状態初期化
+            passcodeStates.set(interaction.user.id, "");
+
+            // UI送信
+            await interaction.update({
+                content: "パスコードを入力してください\n`#`",
+                embeds: [], // Embedは消すか、必要なら残す
+                components: menuConfig.passcodeKeypad()
+            });
+
+            if (updateHistoryCallback) updateHistoryCallback(interaction, userActionText, "パスコード入力画面を表示");
+            await logUserAction(interaction.user, userActionText, "パスコード入力画面を表示");
+            return; // ここで終了
+
         default:
             userActionText = `「${processKey}」を選んだ`;
             replyText = 'その機能はまだ準備中です。';
@@ -311,6 +335,57 @@ async function handleClassMenu(interaction, subAction, subject, updateHistoryCal
         await originalMessage.edit({ components: disabledComponents });
     }
 }
+
+/**
+ * パスコード入力のボタン処理
+ */
+async function handlePasscodeInteraction(interaction, key, updateHistoryCallback) {
+    const userId = interaction.user.id;
+    let currentCode = passcodeStates.get(userId) || "";
+
+    // 文字入力キー (0-9)
+    if (!isNaN(key)) {
+        if (currentCode.length < 4) {
+            currentCode += key;
+            passcodeStates.set(userId, currentCode);
+        }
+    }
+    // Backボタン
+    else if (key === 'back') {
+        currentCode = currentCode.slice(0, -1);
+        passcodeStates.set(userId, currentCode);
+    }
+    // Enterボタン
+    else if (key === 'enter') {
+        // パスコード確定処理
+        await interaction.deferReply({ ephemeral: true });
+
+        const replyText = `入力されたコード: ${currentCode}\n（認証ロジックは未実装です）`;
+        await interaction.editReply({ content: replyText });
+
+        // メッセージ更新（元のキーパッドを無効化または削除）
+        // ここでは簡単に完了メッセージに書き換える
+        await interaction.message.edit({
+            content: "パスコード入力を終了しました。",
+            components: []
+        });
+
+        // 状態クリア
+        passcodeStates.delete(userId);
+
+        if (updateHistoryCallback) updateHistoryCallback(interaction, `パスコード「${currentCode}」を入力した`, replyText);
+        await logUserAction(interaction.user, `パスコード「${currentCode}」を入力した`, replyText);
+        return;
+    }
+
+    // 表示更新
+    // 入力文字数分だけ "*" を表示。空なら "#"
+    const displayCode = currentCode.length > 0 ? "*".repeat(currentCode.length) : "#";
+    await interaction.update({
+        content: `パスコードを入力してください\n\`${displayCode}\``
+    });
+}
+
 
 module.exports = {
     handleInteraction

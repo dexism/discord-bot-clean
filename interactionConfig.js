@@ -117,6 +117,31 @@ const menuConfig = {
             createButton(`class_select_${subject}`, `${className}を選択する`, ButtonStyle.Success),
             createButton('class_return_list', '選択メニューに戻る', ButtonStyle.Secondary)
         );
+    },
+
+    // パスコード入力用テンキー
+    passcodeKeypad: () => {
+        const row1 = new ActionRowBuilder().addComponents(
+            createButton('pass_7', '７', ButtonStyle.Primary),
+            createButton('pass_8', '８', ButtonStyle.Primary),
+            createButton('pass_9', '９', ButtonStyle.Primary)
+        );
+        const row2 = new ActionRowBuilder().addComponents(
+            createButton('pass_4', '４', ButtonStyle.Primary),
+            createButton('pass_5', '５', ButtonStyle.Primary),
+            createButton('pass_6', '６', ButtonStyle.Primary)
+        );
+        const row3 = new ActionRowBuilder().addComponents(
+            createButton('pass_1', '１', ButtonStyle.Primary),
+            createButton('pass_2', '２', ButtonStyle.Primary),
+            createButton('pass_3', '３', ButtonStyle.Primary)
+        );
+        const row4 = new ActionRowBuilder().addComponents(
+            createButton('pass_0', '０', ButtonStyle.Primary),
+            createButton('pass_back', '←', ButtonStyle.Success), // 緑
+            createButton('pass_enter', 'Enter', ButtonStyle.Danger) // 赤
+        );
+        return [row1, row2, row3, row4];
     }
 };
 
