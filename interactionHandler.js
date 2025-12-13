@@ -42,17 +42,29 @@ async function handleInteraction(interaction, context) {
                     // テンプレート変数の置換
                     const description = mainPage.descriptionTemplate.replace('{{UserName}}', interaction.user.displayName);
 
-                    const embed = new EmbedBuilder()
+                    const embeds = [];
+
+                    // 画像用Embed（上部）
+                    if (mainPage.imageURL) {
+                        const imageEmbed = new EmbedBuilder()
+                            .setImage(mainPage.imageURL)
+                            .setColor(mainPage.embedColor || '#0099ff');
+                        embeds.push(imageEmbed);
+                    }
+
+                    // テキスト用Embed（下部）
+                    const textEmbed = new EmbedBuilder()
                         .setDescription(description)
                         .setColor(mainPage.embedColor || '#0099ff');
 
-                    if (mainPage.title) embed.setTitle(mainPage.title);
-                    if (mainPage.imageURL) embed.setImage(mainPage.imageURL);
-                    if (mainPage.thumbnailURL) embed.setThumbnail(mainPage.thumbnailURL);
+                    if (mainPage.title) textEmbed.setTitle(mainPage.title);
+                    if (mainPage.thumbnailURL) textEmbed.setThumbnail(mainPage.thumbnailURL);
+
+                    embeds.push(textEmbed);
 
                     await interaction.editReply({
-                        content: '', // Embed利用時は空に
-                        embeds: [embed],
+                        content: '',
+                        embeds: embeds,
                         components: components
                     });
                 } else {
@@ -115,17 +127,29 @@ async function handleDynamicNavigation(interaction, targetPageId, updateHistoryC
     const components = generateDynamicMenu(targetPage);
     const description = targetPage.descriptionTemplate.replace('{{UserName}}', interaction.user.displayName);
 
-    const embed = new EmbedBuilder()
+    const embeds = [];
+
+    // 画像用Embed（上部）
+    if (targetPage.imageURL) {
+        const imageEmbed = new EmbedBuilder()
+            .setImage(targetPage.imageURL)
+            .setColor(targetPage.embedColor || '#0099ff');
+        embeds.push(imageEmbed);
+    }
+
+    // テキスト用Embed（下部）
+    const textEmbed = new EmbedBuilder()
         .setDescription(description)
         .setColor(targetPage.embedColor || '#0099ff');
 
-    if (targetPage.title) embed.setTitle(targetPage.title);
-    if (targetPage.imageURL) embed.setImage(targetPage.imageURL);
-    if (targetPage.thumbnailURL) embed.setThumbnail(targetPage.thumbnailURL);
+    if (targetPage.title) textEmbed.setTitle(targetPage.title);
+    if (targetPage.thumbnailURL) textEmbed.setThumbnail(targetPage.thumbnailURL);
+
+    embeds.push(textEmbed);
 
     await interaction.update({
         content: '',
-        embeds: [embed],
+        embeds: embeds,
         components: components
     });
 }
