@@ -187,6 +187,24 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
         return;
     }
 
+    // パスコード入力開始
+    if (processKey === 'inputPass') {
+        const userActionText = '「パスコード入力」を開始した';
+        // 状態初期化
+        passcodeStates.set(interaction.user.id, "");
+
+        // UI送信
+        await interaction.update({
+            content: "パスコードを入力してください\n`#`",
+            embeds: [],
+            components: menuConfig.passcodeKeypad()
+        });
+
+        if (updateHistoryCallback) updateHistoryCallback(interaction, userActionText, "パスコード入力画面を表示");
+        await logUserAction(interaction.user, userActionText, "パスコード入力画面を表示");
+        return;
+    }
+
     // その他の未実装機能など
     await interaction.deferReply({ ephemeral: true });
 
@@ -200,22 +218,6 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
         case 'board': userActionText = '「依頼掲示板」を選んだ'; replyText = '掲示板を確認します。（未実装）'; break;
         case 'shop': userActionText = '「買い物」を選んだ'; replyText = '何を買いますか？（未実装）'; break;
         case 'sell': userActionText = '「買取り」を選んだ'; replyText = '何を売却しますか？（未実装）'; break;
-        case 'inputPass':
-            // パスコード入力開始
-            userActionText = '「パスコード入力」を開始した';
-            // 状態初期化
-            passcodeStates.set(interaction.user.id, "");
-
-            // UI送信
-            await interaction.update({
-                content: "パスコードを入力してください\n`#`",
-                embeds: [], // Embedは消すか、必要なら残す
-                components: menuConfig.passcodeKeypad()
-            });
-
-            if (updateHistoryCallback) updateHistoryCallback(interaction, userActionText, "パスコード入力画面を表示");
-            await logUserAction(interaction.user, userActionText, "パスコード入力画面を表示");
-            return; // ここで終了
 
         default:
             userActionText = `「${processKey}」を選んだ`;

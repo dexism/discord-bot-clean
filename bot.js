@@ -1,5 +1,5 @@
 // =agreed================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.9.2 (スラッシュコマンド安定化版)
+// TRPGサポートDiscordボット "ノエル" v3.9.3 (スラッシュコマンド安定化版)
 // =================================================================================
 
 require('dotenv').config();
@@ -27,7 +27,7 @@ const { initSheet, loadPersonaText, loadAndFormatAllDataForAI } = require('./she
 // express: サーバーの常時稼働（Render等のスリープ回避）用Webサーバー
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.9.2';
+const BOT_VERSION = 'v3.9.3';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 const GUILD_MASTER_NAME = 'ギルドマスター';
