@@ -8,7 +8,7 @@ const { logUserAction, loadMenuData } = require('./sheetClient');
 // あるいはここでインポート済みの定数を使う。
 // ※ bot.js の BOT_VERSION と同期させるため、handleInteraction の context に version を含める設計にします。
 
-// パスコード入力状態管理 { userId: "1234" }
+// パスコード入力状態管理 { userId: { value: "1234", mode: "id"|"pass" } }
 const passcodeStates = new Map();
 
 /**
@@ -190,18 +190,36 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
     // パスコード入力開始
     if (processKey === 'inputPass') {
         const userActionText = '「パスコード入力」を開始した';
-        // 状態初期化
-        passcodeStates.set(interaction.user.id, "");
+        // 状態初期化 (mode: 'pass')
+        passcodeStates.set(interaction.user.id, { value: "", mode: "pass" });
 
         // UI送信
         await interaction.update({
-            content: "パスコードを入力してください\n`#`",
+            content: "パスコードを入力してください\n# ",
             embeds: [],
             components: menuConfig.passcodeKeypad()
         });
 
         if (updateHistoryCallback) updateHistoryCallback(interaction, userActionText, "パスコード入力画面を表示");
         await logUserAction(interaction.user, userActionText, "パスコード入力画面を表示");
+        return;
+    }
+
+    // ID入力開始
+    if (processKey === 'inputID') {
+        const userActionText = '「ID入力」を開始した';
+        // 状態初期化 (mode: 'id')
+        passcodeStates.set(interaction.user.id, { value: "", mode: "id" });
+
+        // UI送信
+        await interaction.update({
+            content: "IDを入力してください\n# ",
+            embeds: [],
+            components: menuConfig.passcodeKeypad()
+        });
+
+        if (updateHistoryCallback) updateHistoryCallback(interaction, userActionText, "ID入力画面を表示");
+        await logUserAction(interaction.user, userActionText, "ID入力画面を表示");
         return;
     }
 
@@ -343,48 +361,68 @@ async function handleClassMenu(interaction, subAction, subject, updateHistoryCal
  */
 async function handlePasscodeInteraction(interaction, key, updateHistoryCallback) {
     const userId = interaction.user.id;
-    let currentCode = passcodeStates.get(userId) || "";
+    let state = passcodeStates.get(userId);
+
+    // 状態が未定義または文字列(旧仕様)の場合のフォールバック
+    if (!state || typeof state === 'string') {
+        state = { value: state || "", mode: "pass" };
+    }
+
+    let currentCode = state.value;
 
     // 文字入力キー (0-9)
     if (!isNaN(key)) {
         if (currentCode.length < 4) {
             currentCode += key;
-            passcodeStates.set(userId, currentCode);
         }
     }
     // Backボタン
     else if (key === 'back') {
         currentCode = currentCode.slice(0, -1);
-        passcodeStates.set(userId, currentCode);
     }
     // Enterボタン
     else if (key === 'enter') {
         // パスコード確定処理
         await interaction.deferReply({ ephemeral: true });
 
-        const replyText = `入力されたコード: ${currentCode}\n（認証ロジックは未実装です）`;
+        const label = state.mode === 'id' ? 'ID' : 'パスコード';
+        const replyText = `入力された${label}: ${currentCode}\n（認証ロジックは未実装です）`;
         await interaction.editReply({ content: replyText });
 
         // メッセージ更新（元のキーパッドを無効化または削除）
-        // ここでは簡単に完了メッセージに書き換える
         await interaction.message.edit({
-            content: "パスコード入力を終了しました。",
+            content: `${label}入力を終了しました。`,
             components: []
         });
 
         // 状態クリア
         passcodeStates.delete(userId);
 
-        if (updateHistoryCallback) updateHistoryCallback(interaction, `パスコード「${currentCode}」を入力した`, replyText);
-        await logUserAction(interaction.user, `パスコード「${currentCode}」を入力した`, replyText);
+        if (updateHistoryCallback) updateHistoryCallback(interaction, `${label}「${currentCode}」を入力した`, replyText);
+        await logUserAction(interaction.user, `${label}「${currentCode}」を入力した`, replyText);
         return;
     }
 
+    // 状態更新
+    state.value = currentCode;
+    passcodeStates.set(userId, state);
+
     // 表示更新
-    // 入力文字数分だけ "*" を表示。空なら "#"
-    const displayCode = currentCode.length > 0 ? "*".repeat(currentCode.length) : "#";
+    const isPass = (state.mode === 'pass');
+    // パスコードなら * 、IDなら数字そのまま
+    // マークダウン(# )を使用
+    let displayCode = "";
+    if (isPass) {
+        displayCode = currentCode.length > 0 ? "*".repeat(currentCode.length) : "";
+    } else {
+        displayCode = currentCode;
+    }
+
+    // プロンプトもモードに合わせる
+    const prompt = isPass ? "パスコードを入力してください" : "IDを入力してください";
+
     await interaction.update({
-        content: `パスコードを入力してください\n\`${displayCode}\``
+        content: `${prompt}\n# ${displayCode}`
     });
 }
 
