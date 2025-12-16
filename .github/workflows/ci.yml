@@ -27,4 +27,9 @@ jobs:
         run: npm run build
 
       - name: テスト実行 (Vitest)
+        env:
+          SPREADSHEET_ID: test_sheet_id
+          GOOGLE_CREDENTIALS_JSON: '{"client_email": "test@example.com", "private_key": "test_key"}'
+          GEMINI_API_KEY: test_key
+          DISCORD_TOKEN: test_token
         run: npm run test
