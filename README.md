@@ -1,5 +1,7 @@
 # Discord Bot "Noelle" (TypeScript)
 
+![CI](https://github.com/dexism/discord-bot-clean/actions/workflows/ci.yml/badge.svg)
+
 TRPG/SLGサポート用Discordボット「ノエル」のTypeScript版プロジェクトです。
 Google Gemini APIによる自然言語対話、Google Sheetsによるデータ管理機能を備えています。
 
@@ -63,9 +65,13 @@ PowerShellスクリプトを使用します。ビルド・コミット・プッ�
 ```powershell
 .\scripts\deploy.ps1 "コミットメッセージ"
 ```
+Render Web Service と UptimeRobot による稼働維持を利用しています。
 
 ## ライセンス
 [MIT License](LICENSE)
 
 本ソフトウェアは MIT ライセンスの下で提供されています。詳細については [LICENSE](LICENSE) ファイルを参照してください。
 
+### 日本語参考訳
+
+MITライセンスの日本語訳を [LICENSE_JP](./LICENSE_JP) に記載しています。
