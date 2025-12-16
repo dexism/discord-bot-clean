@@ -9,6 +9,12 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+      GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
 
     steps:
       - name: ソースコードをチェックアウト
@@ -27,9 +33,4 @@ jobs:
         run: npm run build
 
       - name: テスト実行 (Vitest)
-        env:
-          SPREADSHEET_ID: test_sheet_id
-          GOOGLE_CREDENTIALS_JSON: '{"client_email": "test@example.com", "private_key": "test_key"}'
-          GEMINI_API_KEY: test_key
-          DISCORD_TOKEN: test_token
         run: npm run test

@@ -1,6 +1,8 @@
 # Discord Bot "Noelle" (TypeScript)
 
-![CI](https://github.com/dexism/discord-bot-clean/actions/workflows/ci.yml/badge.svg)
+![CI Status](https://github.com/dexism/discord-bot-clean/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D18-green)
 
 TRPG/SLGサポート用Discordボット「ノエル」のTypeScript版プロジェクトです。
 Google Gemini APIによる自然言語対話、Google Sheetsによるデータ管理機能を備えています。
