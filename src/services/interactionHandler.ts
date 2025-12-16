@@ -1,31 +1,43 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
-const { classDetails, menuConfig, generateDynamicMenu } = require('./interactionConfig');
-const { logUserAction, loadMenuData } = require('./sheetClient');
+import {
+    CacheType,
+    Interaction,
+    ChatInputCommandInteraction,
+    ButtonInteraction,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    Message
+} from 'discord.js';
+import { classDetails, menuConfig, generateDynamicMenu, MenuPageData, MenuPageButton } from '../utils/interactionConfig';
+import { logUserAction, loadMenuData } from './sheetClient';
 
-// Botのバージョン（bot.jsから渡すか、共有設定にするのが理想だが、引数で受け取る形を想定）
-// ここでは簡易的に定数として定義、または必要に応じて引数で受け取る設計にする
-// 今回は bot.js 側でハンドラ呼び出し時に必要なテキストは渡す想定で実装するか、
-// あるいはここでインポート済みの定数を使う。
-// ※ bot.js の BOT_VERSION と同期させるため、handleInteraction の context に version を含める設計にします。
+// コンテキストの型定義
+export interface InteractionContext {
+    botVersion: string;
+    updateHistoryCallback: (interaction: Interaction, userActionText: string, replyText: string) => void;
+}
 
-// パスコード入力状態管理 { userId: { value: "1234", mode: "id"|"pass" } }
-const passcodeStates = new Map();
+// パスコードの状態定義
+interface PasscodeState {
+    value: string;
+    mode: 'id' | 'pass';
+}
+
+const passcodeStates = new Map<string, PasscodeState>();
 
 /**
  * インタラクションを一括処理するメインハンドラ
  * @param {Interaction} interaction - Discord Interaction Object
  * @param {Object} context - { botVersion, updateHistoryCallback, botPersonaName }
  */
-async function handleInteraction(interaction, context) {
+export async function handleInteraction(interaction: Interaction, context: InteractionContext): Promise<void> {
     const { botVersion, updateHistoryCallback } = context;
 
     // --- Slash Commands ---
     if (interaction.isChatInputCommand()) {
-        const { commandName } = interaction;
+        const commandName = interaction.commandName;
         try {
-            // deferReply (menuのみ通常表示、他はephemeralの可能性も考慮、今回はbot.jsの仕様に合わせる)
-            // 元のコード: menu以外も deferReply しているが、menuはephemeral:false、他はtrueにしていないコードだった(bot.js:326)。
-            // bot.js の修正版: ephemeral: commandName !== 'menu'
             await interaction.deferReply({ ephemeral: commandName !== 'menu' });
 
             if (commandName === 'ping') {
@@ -35,29 +47,23 @@ async function handleInteraction(interaction, context) {
                 await interaction.editReply(`現在の私のバージョンは ${botVersion} です`);
             }
             else if (commandName === 'menu') {
-                // 初回はメインメニューを表示
-                // シートから最新データを取得（キャッシュ有効）
                 const allMenuData = await loadMenuData();
                 const mainPage = allMenuData ? allMenuData['main'] : null;
 
                 if (mainPage) {
                     const components = generateDynamicMenu(mainPage);
-                    // テンプレート変数の置換
                     const description = mainPage.descriptionTemplate.replace('{{UserName}}', interaction.user.displayName);
 
-                    const embeds = [];
+                    const embeds: EmbedBuilder[] = [];
 
-                    // 画像用Embed（上部）
                     if (mainPage.imageURL) {
-                        const imageEmbed = new EmbedBuilder()
-                            .setImage(mainPage.imageURL);
+                        const imageEmbed = new EmbedBuilder().setImage(mainPage.imageURL);
                         embeds.push(imageEmbed);
                     }
 
-                    // テキスト用Embed（下部）
                     const textEmbed = new EmbedBuilder()
                         .setDescription(description)
-                        .setColor(mainPage.embedColor || '#0099ff');
+                        .setColor((mainPage.embedColor as any) || '#0099ff');
 
                     if (mainPage.title) textEmbed.setTitle(mainPage.title);
                     if (mainPage.thumbnailURL) textEmbed.setThumbnail(mainPage.thumbnailURL);
@@ -70,7 +76,6 @@ async function handleInteraction(interaction, context) {
                         components: components
                     });
                 } else {
-                    // フォールバック（データロード失敗時など）
                     await interaction.editReply({
                         content: 'いらっしゃいませ！なにをお望みですか？\n(メニューデータの読み込みに失敗しました)',
                         components: [menuConfig.mainMenu()]
@@ -85,12 +90,13 @@ async function handleInteraction(interaction, context) {
 
     // --- Button Interactions ---
     if (interaction.isButton()) {
-        const [action, subAction, subject] = interaction.customId.split('_');
+        const customId = interaction.customId;
+        const [action, subAction, subject] = customId.split('_');
         try {
             if (action === 'menu') {
                 if (subAction === 'nav') {
                     // ページ遷移: menu_nav_{pageId}
-                    await handleDynamicNavigation(interaction, subject, updateHistoryCallback);
+                    await handleDynamicNavigation(interaction, subject);
                 } else if (subAction === 'process') {
                     // 具体的な処理: menu_process_{processKey}
                     await handleDynamicProcess(interaction, subject, updateHistoryCallback);
@@ -104,11 +110,12 @@ async function handleInteraction(interaction, context) {
             }
             else if (action === 'pass') {
                 // pass_0, pass_back, pass_enter など
-                await handlePasscodeInteraction(interaction, subAction, updateHistoryCallback);
+                // subAction がキーになる
+                const key = subAction;
+                await handlePasscodeInteraction(interaction, key, updateHistoryCallback);
             }
         } catch (error) {
             console.error('Error in button interaction:', error);
-            // エラー時の安全なリプライ
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: 'すみません、エラーが発生しました。', ephemeral: true }).catch(() => { });
             } else {
@@ -121,7 +128,7 @@ async function handleInteraction(interaction, context) {
 /**
  * 動的メニューのページ遷移処理
  */
-async function handleDynamicNavigation(interaction, targetPageId, updateHistoryCallback) {
+async function handleDynamicNavigation(interaction: ButtonInteraction, targetPageId: string): Promise<void> {
     const allMenuData = await loadMenuData();
     const targetPage = allMenuData ? allMenuData[targetPageId] : null;
 
@@ -133,19 +140,16 @@ async function handleDynamicNavigation(interaction, targetPageId, updateHistoryC
     const components = generateDynamicMenu(targetPage);
     const description = targetPage.descriptionTemplate.replace('{{UserName}}', interaction.user.displayName);
 
-    const embeds = [];
+    const embeds: EmbedBuilder[] = [];
 
-    // 画像用Embed（上部）
     if (targetPage.imageURL) {
-        const imageEmbed = new EmbedBuilder()
-            .setImage(targetPage.imageURL);
+        const imageEmbed = new EmbedBuilder().setImage(targetPage.imageURL);
         embeds.push(imageEmbed);
     }
 
-    // テキスト用Embed（下部）
     const textEmbed = new EmbedBuilder()
         .setDescription(description)
-        .setColor(targetPage.embedColor || '#0099ff');
+        .setColor((targetPage.embedColor as any) || '#0099ff');
 
     if (targetPage.title) textEmbed.setTitle(targetPage.title);
     if (targetPage.thumbnailURL) textEmbed.setThumbnail(targetPage.thumbnailURL);
@@ -162,10 +166,16 @@ async function handleDynamicNavigation(interaction, targetPageId, updateHistoryC
 /**
  * 動的メニューからの処理実行
  */
-async function handleDynamicProcess(interaction, processKey, updateHistoryCallback) {
-    // 登録画面へ（既存ロジックへのブリッジ）
+async function handleDynamicProcess(
+    interaction: ButtonInteraction,
+    processKey: string,
+    updateHistoryCallback: InteractionContext['updateHistoryCallback']
+): Promise<void> {
+
+    // 登録画面へ
     if (processKey === 'register') {
-        await interaction.update(menuConfig.classList());
+        const { content, components } = menuConfig.classList();
+        await interaction.update({ content, components });
         return;
     }
 
@@ -175,25 +185,23 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
         const replyText = '承知いたしました。またお越しくださいませ。';
         await interaction.editReply({ content: replyText });
 
-        // ログ記録
         if (updateHistoryCallback) updateHistoryCallback(interaction, '「帰る」を選んだ', replyText);
         await logUserAction(interaction.user, '「帰る」を選んだ', replyText);
 
-        // ボタン無効化
         const originalMessage = interaction.message;
-        const disabledRow = ActionRowBuilder.from(originalMessage.components[0]);
-        disabledRow.components.forEach(component => component.setDisabled(true));
-        await originalMessage.edit({ components: [disabledRow] });
+        // 型アサーション: メッセージコンポーネントを安全に操作
+        const disabledRow = ActionRowBuilder.from(originalMessage.components[0] as any);
+        disabledRow.components.forEach((component: any) => component.setDisabled(true));
+        // ActionRowBuilder<ButtonBuilder> としてキャストして渡す
+        await originalMessage.edit({ components: [disabledRow as ActionRowBuilder<ButtonBuilder>] });
         return;
     }
 
     // パスコード入力開始
     if (processKey === 'inputPass') {
         const userActionText = '「パスコード入力」を開始した';
-        // 状態初期化 (mode: 'pass')
         passcodeStates.set(interaction.user.id, { value: "", mode: "pass" });
 
-        // UI送信
         await interaction.update({
             content: "パスコードを入力してください\n# ",
             embeds: [],
@@ -208,10 +216,8 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
     // ID入力開始
     if (processKey === 'inputID') {
         const userActionText = '「ID入力」を開始した';
-        // 状態初期化 (mode: 'id')
         passcodeStates.set(interaction.user.id, { value: "", mode: "id" });
 
-        // UI送信
         await interaction.update({
             content: "IDを入力してください\n# ",
             embeds: [],
@@ -223,12 +229,11 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
         return;
     }
 
-    // その他の未実装機能など
+    // その他の機能
     await interaction.deferReply({ ephemeral: true });
 
     let userActionText = '', replyText = '';
 
-    // keyに応じたテキスト定義
     switch (processKey) {
         case 'status': userActionText = '「ステータス」を選んだ'; replyText = 'ステータス確認ですね。（未実装）'; break;
         case 'inventory': userActionText = '「持ち物」を選んだ'; replyText = '持ち物確認ですね。（未実装）'; break;
@@ -236,7 +241,6 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
         case 'board': userActionText = '「依頼掲示板」を選んだ'; replyText = '掲示板を確認します。（未実装）'; break;
         case 'shop': userActionText = '「買い物」を選んだ'; replyText = '何を買いますか？（未実装）'; break;
         case 'sell': userActionText = '「買取り」を選んだ'; replyText = '何を売却しますか？（未実装）'; break;
-
         default:
             userActionText = `「${processKey}」を選んだ`;
             replyText = 'その機能はまだ準備中です。';
@@ -251,15 +255,18 @@ async function handleDynamicProcess(interaction, processKey, updateHistoryCallba
 
 /**
  * メインメニューのボタン処理（レガシー互換用）
- * ※動的メニュー移行後は徐々に不要になるが、コード内に残っている古い呼び出しのために残す
  */
-async function handleMainMenu(interaction, subAction, updateHistoryCallback) {
-    // 登録画面へ
+async function handleMainMenu(
+    interaction: ButtonInteraction,
+    subAction: string,
+    updateHistoryCallback: InteractionContext['updateHistoryCallback']
+): Promise<void> {
+
     if (subAction === 'register') {
-        await interaction.update(menuConfig.classList());
+        const { content, components } = menuConfig.classList();
+        await interaction.update({ content, components });
         return;
     }
-    // 戻る（クラス選択などからメインメニューへ）
     if (subAction === 'return') {
         await interaction.update({
             content: 'いらっしゃいませ！なにをお望みですか？',
@@ -268,11 +275,10 @@ async function handleMainMenu(interaction, subAction, updateHistoryCallback) {
         return;
     }
 
-    // それ以外のアクション（ステータス、掲示板、帰る）→ 完了メッセージを表示してボタン無効化
     await interaction.deferReply({ ephemeral: true });
 
     let userActionText = '', replyText = '';
-    switch (subAction) { // menu_xxx の xxx 部分
+    switch (subAction) {
         case 'status':
             userActionText = '「ステータスを確認する」を選んだ';
             replyText = 'はい、ステータスの確認ですね。承知いたしました。（以降の処理は未実装です）';
@@ -292,32 +298,34 @@ async function handleMainMenu(interaction, subAction, updateHistoryCallback) {
 
     await interaction.editReply({ content: replyText });
 
-    // 履歴更新コールバックを実行
     if (updateHistoryCallback) {
         updateHistoryCallback(interaction, userActionText, replyText);
     }
 
-    // スプレッドシートにログを記録
     await logUserAction(interaction.user, userActionText, replyText);
 
-    // 元のメッセージのボタンを無効化
     const originalMessage = interaction.message;
-    const disabledRow = ActionRowBuilder.from(originalMessage.components[0]);
-    disabledRow.components.forEach(component => component.setDisabled(true));
-    await originalMessage.edit({ components: [disabledRow] });
+    const disabledRow = ActionRowBuilder.from(originalMessage.components[0] as any);
+    disabledRow.components.forEach((component: any) => component.setDisabled(true));
+    await originalMessage.edit({ components: [disabledRow as ActionRowBuilder<ButtonBuilder>] });
 }
 
 /**
  * クラス選択メニューのボタン処理
  */
-async function handleClassMenu(interaction, subAction, subject, updateHistoryCallback) {
-    // リストへ戻る
+async function handleClassMenu(
+    interaction: ButtonInteraction,
+    subAction: string,
+    subject: string,
+    updateHistoryCallback: InteractionContext['updateHistoryCallback']
+): Promise<void> {
+
     if (subAction === 'return' && subject === 'list') {
-        await interaction.update(menuConfig.classList());
+        const { content, components } = menuConfig.classList();
+        await interaction.update({ content, components });
         return;
     }
 
-    // 詳細表示
     if (subAction === 'details') {
         const classInfo = classDetails[subject];
         if (!classInfo) return;
@@ -327,7 +335,6 @@ async function handleClassMenu(interaction, subAction, subject, updateHistoryCal
         return;
     }
 
-    // 選択確定
     if (subAction === 'select') {
         await interaction.deferReply({ ephemeral: true });
         const classInfo = classDetails[subject];
@@ -342,60 +349,57 @@ async function handleClassMenu(interaction, subAction, subject, updateHistoryCal
             updateHistoryCallback(interaction, userActionText, replyText);
         }
 
-        // スプレッドシートにログを記録
         await logUserAction(interaction.user, userActionText, replyText);
 
-        // 全ボタン無効化
         const originalMessage = interaction.message;
         const disabledComponents = originalMessage.components.map(row => {
-            const newRow = ActionRowBuilder.from(row);
-            newRow.components.forEach(component => component.setDisabled(true));
+            const newRow = ActionRowBuilder.from(row as any);
+            newRow.components.forEach((component: any) => component.setDisabled(true));
             return newRow;
         });
-        await originalMessage.edit({ components: disabledComponents });
+        // ActionRowBuilder<ButtonBuilder>[] にキャスト
+        await originalMessage.edit({ components: disabledComponents as any });
     }
 }
 
 /**
  * パスコード入力のボタン処理
  */
-async function handlePasscodeInteraction(interaction, key, updateHistoryCallback) {
+async function handlePasscodeInteraction(
+    interaction: ButtonInteraction,
+    key: string,
+    updateHistoryCallback: InteractionContext['updateHistoryCallback']
+): Promise<void> {
     const userId = interaction.user.id;
     let state = passcodeStates.get(userId);
 
-    // 状態が未定義または文字列(旧仕様)の場合のフォールバック
-    if (!state || typeof state === 'string') {
-        state = { value: state || "", mode: "pass" };
+    // 古い形式の状態管理がもしあれば互換性維持...はTSなので今回は厳密に
+    if (!state) {
+        state = { value: "", mode: "pass" };
     }
 
     let currentCode = state.value;
 
-    // 文字入力キー (0-9)
-    if (!isNaN(key)) {
+    if (!isNaN(parseInt(key))) {
         if (currentCode.length < 4) {
             currentCode += key;
         }
     }
-    // Backボタン
     else if (key === 'back') {
         currentCode = currentCode.slice(0, -1);
     }
-    // Enterボタン
     else if (key === 'enter') {
-        // パスコード確定処理
         await interaction.deferReply({ ephemeral: true });
 
         const label = state.mode === 'id' ? 'ID' : 'パスコード';
         const replyText = `入力された${label}: ${currentCode}\n（認証ロジックは未実装です）`;
         await interaction.editReply({ content: replyText });
 
-        // メッセージ更新（元のキーパッドを無効化または削除）
         await interaction.message.edit({
             content: `${label}入力を終了しました。`,
             components: []
         });
 
-        // 状態クリア
         passcodeStates.delete(userId);
 
         if (updateHistoryCallback) updateHistoryCallback(interaction, `${label}「${currentCode}」を入力した`, replyText);
@@ -403,14 +407,10 @@ async function handlePasscodeInteraction(interaction, key, updateHistoryCallback
         return;
     }
 
-    // 状態更新
     state.value = currentCode;
     passcodeStates.set(userId, state);
 
-    // 表示更新
     const isPass = (state.mode === 'pass');
-    // パスコードなら * 、IDなら数字そのまま
-    // マークダウン(# )を使用
     let displayCode = "";
     if (isPass) {
         displayCode = currentCode.length > 0 ? "*".repeat(currentCode.length) : "";
@@ -418,15 +418,9 @@ async function handlePasscodeInteraction(interaction, key, updateHistoryCallback
         displayCode = currentCode;
     }
 
-    // プロンプトもモードに合わせる
     const prompt = isPass ? "パスコードを入力してください" : "IDを入力してください";
 
     await interaction.update({
         content: `${prompt}\n# ${displayCode}`
     });
 }
-
-
-module.exports = {
-    handleInteraction
-};

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ソースコードをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.jsをセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: TypeScriptビルド
+        run: npm run build
+
+      - name: テスト実行 (Vitest)
+        run: npm run test

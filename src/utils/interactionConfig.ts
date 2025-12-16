@@ -1,9 +1,18 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, AnyComponentBuilder, ButtonInteraction } from 'discord.js';
+
+interface ClassDetail {
+    name: string;
+    description: string;
+}
+
+interface ClassDetails {
+    [key: string]: ClassDetail;
+}
 
 /**
  * クラス（職業）の詳細データ定義
  */
-const classDetails = {
+export const classDetails: ClassDetails = {
     merchant: {
         name: '商人',
         description: "## **商人**\n交渉力と市場感覚に優れ、原価を徹底的に削ることで利益を最大化する**合理的経営者**。信用を重んじ、実利を追求します。"
@@ -33,22 +42,36 @@ const classDetails = {
 /**
  * 汎用的なボタン生成ヘルパー
  */
-const createButton = (id, label, style = ButtonStyle.Primary) => {
+const createButton = (id: string, label: string, style: ButtonStyle = ButtonStyle.Primary): ButtonBuilder => {
     return new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
 };
+
+export interface MenuPageButton {
+    row?: number;
+    actionType: string;
+    target: string;
+    style: 'Primary' | 'Secondary' | 'Success' | 'Danger' | 'Link';
+    label: string;
+}
+
+export interface MenuPageData {
+    buttons?: MenuPageButton[];
+}
 
 /**
  * 動的なメニューデータを元にActionRow配列を生成します。
  * @param {Object} menuPageData - loadMenuData() で取得した特定ページのデータ
- * @returns {Array<ActionRowBuilder>}
+ * @returns {Array<ActionRowBuilder<ButtonBuilder>>}
  */
-const generateDynamicMenu = (menuPageData) => {
+export const generateDynamicMenu = (menuPageData: MenuPageData | null): ActionRowBuilder<ButtonBuilder>[] => {
     if (!menuPageData || !menuPageData.buttons) return [];
 
-    const rows = {};
+    const rows: { [key: number]: ActionRowBuilder<ButtonBuilder> } = {};
     menuPageData.buttons.forEach(btn => {
         const rowIndex = btn.row || 1;
-        if (!rows[rowIndex]) rows[rowIndex] = new ActionRowBuilder();
+        if (!rows[rowIndex]) rows[rowIndex] = new ActionRowBuilder<ButtonBuilder>();
+
+        let customId: string | null = null;
 
         if (btn.actionType === 'LINK') {
             // LINKボタンは customId を持たず、URLを持つ
@@ -67,24 +90,26 @@ const generateDynamicMenu = (menuPageData) => {
         if (btn.actionType === 'LINK') {
             buttonComponent.setURL(btn.target);
         } else {
-            buttonComponent.setCustomId(customId);
+            if (customId) {
+                buttonComponent.setCustomId(customId);
+            }
         }
 
         rows[rowIndex].addComponents(buttonComponent);
     });
 
     // 行番号順にソートして配列化
-    return Object.keys(rows).sort().map(key => rows[key]);
+    return Object.keys(rows).sort().map(key => rows[parseInt(key)]);
 };
 
 /**
  * メニュー構成定義
  * 各機能へのアクセサを提供
  */
-const menuConfig = {
+export const menuConfig = {
     // メニュー初期表示のボタン群
-    mainMenu: () => {
-        return new ActionRowBuilder().addComponents(
+    mainMenu: (): ActionRowBuilder<ButtonBuilder> => {
+        return new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('menu_register', 'キャラクターを登録する', ButtonStyle.Success),
             createButton('menu_status', 'ステータスを確認する', ButtonStyle.Primary),
             createButton('menu_board', '依頼掲示板を見る', ButtonStyle.Primary),
@@ -93,50 +118,50 @@ const menuConfig = {
     },
 
     // クラス選択リストの表示用コンポーネント
-    classList: () => {
+    classList: (): { content: string; components: ActionRowBuilder<ButtonBuilder>[] } => {
         const content = "## **キャラクタークラス選択**\nあなたの経営者としての第一歩は、いずれかの「プライムクラス」から始まります。\nプライムクラスは、健全で信頼される経営スタイルを体現する存在です。\nあなたの選択は、今後の戦略・人脈・評判・そして“闇”への可能性をも左右します。\n\n**詳しく知りたいクラスを選択してください。**";
-        const row1 = new ActionRowBuilder().addComponents(
+        const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('class_details_merchant', '商人について詳しく聞く', ButtonStyle.Primary),
             createButton('class_details_artisan', '職人について詳しく聞く', ButtonStyle.Primary),
             createButton('class_details_leader', 'リーダーについて詳しく聞く', ButtonStyle.Primary),
         );
-        const row2 = new ActionRowBuilder().addComponents(
+        const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('class_details_engineer', 'エンジニアについて詳しく聞く', ButtonStyle.Primary),
             createButton('class_details_magnate', 'マグナートについて詳しく聞く', ButtonStyle.Primary),
             createButton('class_details_trader', 'トレーダーについて詳しく聞く', ButtonStyle.Primary),
         );
-        const row3 = new ActionRowBuilder().addComponents(
+        const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('menu_return', 'メインメニューに戻る', ButtonStyle.Secondary)
         );
         return { content, components: [row1, row2, row3] };
     },
 
     // クラス詳細表示時のボタン群
-    classDetailsButtons: (subject, className) => {
-        return new ActionRowBuilder().addComponents(
+    classDetailsButtons: (subject: string, className: string): ActionRowBuilder<ButtonBuilder> => {
+        return new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton(`class_select_${subject}`, `${className}を選択する`, ButtonStyle.Success),
             createButton('class_return_list', '選択メニューに戻る', ButtonStyle.Secondary)
         );
     },
 
     // パスコード入力用テンキー
-    passcodeKeypad: () => {
-        const row1 = new ActionRowBuilder().addComponents(
+    passcodeKeypad: (): ActionRowBuilder<ButtonBuilder>[] => {
+        const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('pass_7', '７', ButtonStyle.Primary),
             createButton('pass_8', '８', ButtonStyle.Primary),
             createButton('pass_9', '９', ButtonStyle.Primary)
         );
-        const row2 = new ActionRowBuilder().addComponents(
+        const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('pass_4', '４', ButtonStyle.Primary),
             createButton('pass_5', '５', ButtonStyle.Primary),
             createButton('pass_6', '６', ButtonStyle.Primary)
         );
-        const row3 = new ActionRowBuilder().addComponents(
+        const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('pass_1', '１', ButtonStyle.Primary),
             createButton('pass_2', '２', ButtonStyle.Primary),
             createButton('pass_3', '３', ButtonStyle.Primary)
         );
-        const row4 = new ActionRowBuilder().addComponents(
+        const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
             createButton('pass_0', '０', ButtonStyle.Primary),
             createButton('pass_back', '←', ButtonStyle.Success), // 緑
             createButton('pass_enter', 'Enter', ButtonStyle.Danger) // 赤
@@ -144,10 +169,3 @@ const menuConfig = {
         return [row1, row2, row3, row4];
     }
 };
-
-module.exports = {
-    classDetails,
-    menuConfig,
-    generateDynamicMenu
-};
-

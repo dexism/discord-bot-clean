@@ -1,36 +1,16 @@
-// =agreed================================================================================
-// TRPGサポートDiscordボット "ノエル" v3.9.3 (スラッシュコマンド安定化版)
-// =================================================================================
-
-require('dotenv').config();
-const { GoogleGenAI } = require('@google/genai');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionType } = require('discord.js');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { JWT } = require('google-auth-library');
-const express = require('express');
-const { handleInteraction } = require('./interactionHandler');
-const { initSheet, loadPersonaText, loadAndFormatAllDataForAI } = require('./sheetClient');
-
-// ---------------------------------------------------------------------------------
-// 概要:
-// Discordボット「ノエル」のメインスクリプト。
-// Discord.js を使用して Discord と対話し、Google Gemini API を使用して自然言語応答を生成します。
-// Google Sheets をデータベースとして使用し、キャラクターの記憶や知識を管理します。
-// ---------------------------------------------------------------------------------
-
-// --- ライブラリのセットアップ ---
-// dotenv: 環境変数（.env）の読み込み
-// @google/genai: Google Gemini AI API のクライアント
-// discord.js: Discord API ライブラリ
-// google-spreadsheet: Google Sheets 操作用ライブラリ
-// google-auth-library: Google API 認証用 (JWT)
-// express: サーバーの常時稼働（Render等のスリープ回避）用Webサーバー
+import 'dotenv/config';
+import { GoogleGenAI, Part } from '@google/genai';
+import { Client, GatewayIntentBits, Message, MessageFlags } from 'discord.js';
+import express from 'express';
+import { handleInteraction } from './services/interactionHandler';
+import { initSheet, loadPersonaText, loadAndFormatAllDataForAI } from './services/sheetClient';
 
 // --- ボットの基本設定 ---
 const BOT_VERSION = 'v3.9.3';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
-const GUILD_MASTER_NAME = 'ギルドマスター';
+// Unused but kept for reference or future use layout
+// const GUILD_MASTER_NAME = 'ギルドマスター'; 
 const PARTICIPANT_TRACKING_DURATION = 10 * 60 * 1000;
 
 // --- クライアント初期化 ---
@@ -38,68 +18,55 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
-// --- Googleスプレッドシート連携関数 ---
-// (sheetClient.js に移動済み)
 
 // --- グローバル変数 ---
-// channelHistories: 各チャンネルごとの会話履歴をキャッシュするMap。
-// Key: ChannelID, Value: { contents: メッセージ配列, lastTimestamp: 最終更新時刻 }
-// 1時間が経過すると履歴はリセットされます（HISTORY_TIMEOUT）。
-const channelHistories = new Map();
+interface ChannelHistory {
+    contents: { role: 'user' | 'model'; parts: { text: string }[] }[];
+    lastTimestamp: number;
+}
 
-// channelParticipants: 各チャンネルで最近発言したユーザーを追跡するMap。
-// 返信確率の計算（人数が多いほど返信率を下げるなど）に使用されます。
-const channelParticipants = new Map();
+const channelHistories = new Map<string, ChannelHistory>();
+
+// channelParticipants: ChannelID -> Map<UserId, Timestamp>
+const channelParticipants = new Map<string, Map<string, number>>();
 
 // --- ヘルパー関数 ---
 
 /**
  * ダイスコマンド（例: !2d6）を解析します。
- * @param {string} input ユーザーのメッセージ
- * @returns {{count: number, sides: number}|null} 解析結果、または非コマンドならnull
  */
-const parseDiceCommand = (input) => {
+const parseDiceCommand = (input: string): { count: number; sides: number } | null => {
     const match = input.match(/^!(\d+)d(\d+)$/i);
     if (!match) return null;
     const count = parseInt(match[1], 10), sides = parseInt(match[2], 10);
     return { count, sides };
 };
 
-const rollDice = (count, sides) => {
-    let rolls = [];
+const rollDice = (count: number, sides: number): number[] => {
+    let rolls: number[] = [];
     for (let i = 0; i < count; i++) { rolls.push(Math.floor(Math.random() * sides) + 1); }
     return rolls;
 };
 
 // --- Bot起動時処理 ---
 client.once('clientReady', async () => {
-    console.log(`Logged in as ${client.user.tag} | Version: ${BOT_VERSION}`);
+    console.log(`Logged in as ${client.user?.tag} | Version: ${BOT_VERSION}`);
     await initSheet();
 });
 
 // --- メッセージ受信時処理 ---
-/**
- * Discord上のメッセージを受信した際のメインイベントハンドラ。
- * 
- * 処理フロー:
- * 1. Bot自身の発言は無視。
- * 2. '!' で始まる場合はダイスコマンドとして処理。
- * 3. 発言者を「参加者リスト」に登録・更新（直近の発言頻度からアクティブ人数を推定）。
- * 4. Botへのメンション、または名前（ノエル）が含まれるかチェック。
- * 5. スプレッドシートから最新の人格と知識データをロード（都度ロードによりスプシ更新が即反映）。
- * 6. チャンネルごとの会話履歴（コンテキスト）を構築・更新。
- * 7. Gemini API にリクエストを送信し、応答を生成。
- * 8. 応答確率（アクティブ人数に応じたランダム要素）または指名（メンション）に基づき、Discordに返信するか決定。
- */
-client.on('messageCreate', async message => {
+client.on('messageCreate', async (message: Message) => {
     if (message.author.bot) return;
     const command = message.content.trim();
 
+    // Dice Command
     if (command.startsWith('!')) {
         const parsed = parseDiceCommand(command);
         if (parsed) {
             const { count, sides } = parsed;
-            if (count > 100 || sides > 1000) { message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）'); }
+            if (count > 100 || sides > 1000) {
+                message.reply('ダイスの数や面数が多すぎます（上限：100個、1000面）');
+            }
             else {
                 const results = rollDice(count, sides);
                 const total = results.reduce((a, b) => a + b, 0);
@@ -116,10 +83,11 @@ client.on('messageCreate', async message => {
         if (!channelParticipants.has(channelId)) {
             channelParticipants.set(channelId, new Map());
         }
-        const participants = channelParticipants.get(channelId);
+        const participants = channelParticipants.get(channelId)!;
         participants.set(message.author.id, now);
 
-        const recentParticipants = new Set();
+        // クリーンアップ
+        const recentParticipants = new Set<string>();
         for (const [userId, timestamp] of participants.entries()) {
             if (now - timestamp < PARTICIPANT_TRACKING_DURATION) {
                 recentParticipants.add(userId);
@@ -130,7 +98,7 @@ client.on('messageCreate', async message => {
         const participantCount = recentParticipants.size;
         console.log(`[Participant Logic] Active participants: ${participantCount}`);
 
-        const isAddressedToNoelle = message.content.includes(BOT_PERSONA_NAME) || message.mentions.has(client.user);
+        const isAddressedToNoelle = message.content.includes(BOT_PERSONA_NAME) || message.mentions.has(client.user!);
 
         const loadedPersonaText = await loadPersonaText();
         const initialHistoryFromSheets = await loadAndFormatAllDataForAI();
@@ -150,7 +118,7 @@ client.on('messageCreate', async message => {
             channelHistories.set(channelId, channelHistory);
         }
 
-        const userMessage = { role: 'user', parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
+        const userMessage = { role: 'user' as const, parts: [{ text: `User "${message.author.displayName}": "${command}"` }] };
         channelHistory.contents.push(userMessage);
         channelHistory.lastTimestamp = now;
 
@@ -165,26 +133,23 @@ You MUST respond in JAPANESE.
 `;
         }
 
-        const persona = { parts: [{ text: personaText }] };
-        // Gemini API へのリクエストオブジェクトの構築
+        const persona: Part = { text: personaText }; // systemInstruction needs Part or Content
+
+        // Gemini API Request
+        // Note: The SDK types might be slighty different depending on version. 
+        // Adjusting to common usage for @google/genai
         const request = {
-            // 使用モデル: 軽量かつ高速な gemini-2.5-flash-lite を採用
             model: 'gemini-2.5-flash-lite',
-            // model: 'gemini-1.5-flash-001', // 旧モデル（バックアップ用）
-            contents: channelHistory.contents, // 会話履歴（知識データ含む）
-            systemInstruction: persona // システムプロンプト（人格定義）
+            contents: channelHistory.contents,
+            systemInstruction: { parts: [persona] }
         };
 
-        /**
-         * Gemini API をリトライ付きで呼び出す内部関数。
-         * レート制限（429エラー）時に、指数関数的バックオフ（1s, 2s, 4s...）で待機して再試行します。
-         */
-        const generateContentWithRetry = async (request, maxRetries = 5) => {
-            let lastError = null;
+        const generateContentWithRetry = async (req: any, maxRetries = 5) => {
+            let lastError: any = null;
             for (let i = 0; i < maxRetries; i++) {
                 try {
-                    return await ai.models.generateContent(request);
-                } catch (error) {
+                    return await ai.models.generateContent(req);
+                } catch (error: any) {
                     lastError = error;
                     if (error.toString().includes('429')) {
                         const delay = (2 ** i) * 1000 + Math.random() * 1000;
@@ -208,8 +173,6 @@ You MUST respond in JAPANESE.
         if (isAddressedToNoelle) {
             console.log('[Participant Logic] Addressed to Noelle. Replying.');
         } else {
-            // 話しかけられていない場合は、アクティブ参加者数に応じた確率で返信する。
-            // 参加者が多いほど、Botが割り込む頻度を下げる（1/参加者数）。
             const replyProbability = 1 / (participantCount || 1);
             if (Math.random() > replyProbability) {
                 console.log(`[Participant Logic] Not replying due to probability check (${replyProbability.toFixed(2)}).`);
@@ -235,12 +198,10 @@ You MUST respond in JAPANESE.
 });
 
 // --- インタラクション（コマンド・ボタン）受信時処理 ---
-// Slashコマンドおよびボタン操作のイベントハンドラを外部モジュールに委譲
 client.on('interactionCreate', async interaction => {
     // 履歴更新用コールバック
-    // handleInteraction 内でユーザーのアクションが確定した際に呼び出される
-    const updateHistoryCallback = (interaction, userActionText, replyText) => {
-        updateInteractionHistory(interaction, userActionText, replyText);
+    const updateHistoryCallback = (int: any, userActionText: string, replyText: string) => {
+        updateInteractionHistory(int, userActionText, replyText);
     };
 
     const context = {
@@ -251,18 +212,10 @@ client.on('interactionCreate', async interaction => {
     await handleInteraction(interaction, context);
 });
 
-
-
-
-
 /**
- * インタラクション（ボタン操作など）の結果を会話履歴に注入する関数。
- * 
- * 重要: ボタン操作等は通常のチャットログに残らないため、そのままではAIが文脈を理解できません。
- * この関数で「ユーザーが〇〇を選択した」「システムが〇〇と応答した」という情報を
- * 擬似的に会話履歴（channelHistories）に追加することで、AIが直前の操作を踏まえた会話を継続できるようにします。
+ * インタラクション結果を会話履歴に注入
  */
-function updateInteractionHistory(interaction, userActionText, replyText) {
+function updateInteractionHistory(interaction: any, userActionText: string, replyText: string) {
     const channelId = interaction.channel.id;
     let channelHistory = channelHistories.get(channelId);
     if (!channelHistory) {
@@ -270,16 +223,15 @@ function updateInteractionHistory(interaction, userActionText, replyText) {
         channelHistories.set(channelId, channelHistory);
     }
     const now = Date.now();
-    const userMessage = { role: 'user', parts: [{ text: `User "${interaction.user.displayName}": "${userActionText}"` }] };
+    const userMessage = { role: 'user' as const, parts: [{ text: `User "${interaction.user.displayName}": "${userActionText}"` }] };
     channelHistory.contents.push(userMessage);
     channelHistory.lastTimestamp = now;
-    const modelMessage = { role: 'model', parts: [{ text: `${BOT_PERSONA_NAME}: "${replyText}"` }] };
+    const modelMessage = { role: 'model' as const, parts: [{ text: `${BOT_PERSONA_NAME}: "${replyText}"` }] };
     channelHistory.contents.push(modelMessage);
     channelHistory.lastTimestamp = now;
     console.log(`[Interaction Logic] User ${interaction.user.displayName} action: "${userActionText}". History updated.`);
 }
 
-// --- Discordボットのログイン ---
 client.login(process.env.DISCORD_TOKEN);
 
 // --- Renderスリープ対策用Webサーバー ---

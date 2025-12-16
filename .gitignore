@@ -1,4 +1,6 @@
 # 絶対にGitに追加したくないファイルやフォルダ
+dist/
+node_modules/
 .env
 discord-bot-476315-308cfda1862a.json
 deploy.ps1
@@ -6,5 +8,4 @@ deploy.ps1
 deploy-commands.js
 # 全てのMarkdownファイルを無視
 *.md
-
-LICENSE
+!README.md
