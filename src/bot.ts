@@ -6,7 +6,7 @@ import { handleInteraction } from './services/interactionHandler';
 import { initSheet, loadPersonaText, loadAndFormatAllDataForAI } from './services/sheetClient';
 
 // --- ボットの基本設定 ---
-const BOT_VERSION = 'v3.9.0';
+const BOT_VERSION = 'v3.10.0';
 const BOT_PERSONA_NAME = 'ノエル';
 const HISTORY_TIMEOUT = 3600 * 1000;
 // Unused but kept for reference or future use layout
