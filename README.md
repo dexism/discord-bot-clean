@@ -69,8 +69,15 @@ PowerShellスクリプトを使用します。ビルド・コミット・プッ�
 ```
 Render Web Service と UptimeRobot による稼働維持を利用しています。
 
+## ドキュメント
+- [機能概要 (Description)](docs/DESCRIPTION.md)
+- [開発参加ガイド (Contributing Guide)](docs/CONTRIBUTING.md)
+- [行動規範 (Code of Conduct)](docs/CODE_OF_CONDUCT.md)
+- [セキュリティポリシー (Security Policy)](docs/SECURITY.md)
+
 ## ライセンス
 [MIT License](LICENSE)
+
 
 本ソフトウェアは MIT ライセンスの下で提供されています。詳細については [LICENSE](LICENSE) ファイルを参照してください。
 

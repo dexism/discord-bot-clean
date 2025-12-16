@@ -3,9 +3,10 @@ dist/
 node_modules/
 .env
 discord-bot-476315-308cfda1862a.json
-deploy.ps1
+internal-docs/
+# deploy.ps1
 # スラッシュコマンドをDiscordに登録するスクリプト
 deploy-commands.js
 # 全てのMarkdownファイルを無視
-*.md
+# *.md
 !README.md
